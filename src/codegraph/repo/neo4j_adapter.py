@@ -1,0 +1,116 @@
+"""Neo4j-backed CodeGraphRepository. Sync driver wrapped with asyncio.to_thread.
+
+Mirrors the proven pattern from the sibling kg-mcp: every Cypher statement is
+parameterized and filters on graph_id. Relationship-type literals are
+regex-validated before substitution (Neo4j cannot parameterize rel types).
+Read methods beyond connect/migrations/list_repos/get_repo_info are stubs
+implemented in Day 4/5 tasks.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import re
+from typing import Any
+
+from neo4j import Driver, GraphDatabase
+
+from codegraph.config import Settings
+from codegraph.repo.migrations import build_migration_cypher
+
+_REL_TYPE_RE = re.compile(r"^[A-Z_][A-Z0-9_]*$")
+
+
+class Neo4jAdapter:
+    """Concrete CodeGraphRepository backed by a Neo4j 5.x driver."""
+
+    def __init__(self, *, uri: str, user: str, password: str, db: str) -> None:
+        self._driver: Driver = GraphDatabase.driver(uri, auth=(user, password))
+        self._db = db
+
+    @classmethod
+    def from_settings(cls, settings: Settings) -> Neo4jAdapter:
+        return cls(
+            uri=settings.neo4j_uri,
+            user=settings.neo4j_user,
+            password=settings.neo4j_password,
+            db=settings.neo4j_db,
+        )
+
+    async def connect(self) -> None:
+        await asyncio.to_thread(self._driver.verify_connectivity)
+
+    async def close(self) -> None:
+        await asyncio.to_thread(self._driver.close)
+
+    async def apply_migrations(self) -> None:
+        for stmt in build_migration_cypher():
+            await self._run_write(stmt)
+
+    # --- read methods (implemented now) ---
+
+    async def list_repos(self) -> list[dict[str, Any]]:
+        rows = await self._run_read(
+            "MATCH (r:Repository) "
+            "RETURN r.graph_id AS graph_id, r.name AS name, r.url AS url, "
+            "       r.default_branch AS default_branch, r.ingested_at AS ingested_at"
+        )
+        return [dict(r) for r in rows]
+
+    async def get_repo_info(self, *, graph_id: str) -> dict[str, Any] | None:
+        rows = await self._run_read(
+            "MATCH (r:Repository {graph_id: $gid}) "
+            "OPTIONAL MATCH (f:File {graph_id: $gid}) WHERE f.deleted = false "
+            "OPTIONAL MATCH (fn:Function {graph_id: $gid}) "
+            "RETURN r.graph_id AS graph_id, r.name AS name, r.url AS url, "
+            "       r.default_branch AS default_branch, r.ingested_at AS ingested_at, "
+            "       count(DISTINCT f) AS file_count, count(DISTINCT fn) AS function_count",
+            gid=graph_id,
+        )
+        if not rows or rows[0].get("graph_id") is None:
+            return None
+        return dict(rows[0])
+
+    # --- read methods implemented in Day 4/5 ---
+
+    async def get_repo_structure(
+        self, *, graph_id: str, path: str, limit: int
+    ) -> dict[str, Any]:
+        raise NotImplementedError("Day 4")
+
+    async def find_file_dependencies(
+        self, *, graph_id: str, file_path: str, direction: str, max_hops: int
+    ) -> dict[str, Any]:
+        raise NotImplementedError("Day 5")
+
+    async def search_nodes(
+        self, *, graph_id: str, query: str, kind: str, limit: int
+    ) -> list[dict[str, Any]]:
+        raise NotImplementedError("Day 5")
+
+    async def get_node_detail(
+        self, *, graph_id: str, node_id: str
+    ) -> dict[str, Any] | None:
+        raise NotImplementedError("Day 5")
+
+    # --- low-level exec used by graph_builder + tests ---
+
+    async def _run_read(self, cypher: str, **params: Any) -> list[dict[str, Any]]:
+        return await asyncio.to_thread(self._exec_read, cypher, params)
+
+    async def _run_write(self, cypher: str, **params: Any) -> list[dict[str, Any]]:
+        return await asyncio.to_thread(self._exec_write, cypher, params)
+
+    def _exec_read(self, cypher: str, params: dict[str, Any]) -> list[dict[str, Any]]:
+        with self._driver.session(database=self._db) as session:
+            return session.execute_read(lambda tx: tx.run(cypher, params).data())
+
+    def _exec_write(self, cypher: str, params: dict[str, Any]) -> list[dict[str, Any]]:
+        with self._driver.session(database=self._db) as session:
+            return session.execute_write(lambda tx: tx.run(cypher, params).data())
+
+    async def soft_cleanup(self, graph_id: str) -> None:
+        """Test/dev helper: remove all nodes/rels for a graph_id namespace."""
+        await self._run_write(
+            "MATCH (n {graph_id: $gid}) DETACH DELETE n", gid=graph_id
+        )

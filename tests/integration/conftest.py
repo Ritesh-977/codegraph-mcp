@@ -23,9 +23,35 @@ def _have_testcontainers() -> bool:
     return True
 
 
+def _docker_daemon_reachable() -> bool:
+    """Cheap probe: is a Docker daemon reachable from the Python SDK?
+
+    The docker CLI context may point at a named pipe that isn't actually
+    listening yet (Docker Desktop not started). Skip integration tests in
+    that case rather than erroring mid-fixture.
+    """
+    try:
+        import docker
+    except Exception:
+        return False
+    try:
+        import docker
+
+        client = docker.from_env()
+        client.ping()
+        return True
+    except Exception:
+        return False
+
+
 @pytest.fixture()
-def neo4j_env() -> dict[str, str] | None:
-    """Return neo4j connection env if a live instance is available, else None."""
+def neo4j_env():  # type: ignore[no-untyped-def]
+    """Return neo4j connection env if a live instance is available, else skip.
+
+    Resolution order: (1) NEO4J_URI env var already set (manual `docker compose up`);
+    (2) testcontainer spun up ad-hoc — only if Docker daemon is reachable.
+    Skips cleanly if neither path works, so `make test` stays green without Docker.
+    """
     uri = os.environ.get("NEO4J_URI")
     if uri:
         return {
@@ -35,8 +61,8 @@ def neo4j_env() -> dict[str, str] | None:
             "NEO4J_DB": os.environ.get("NEO4J_DB", "neo4j"),
             "REPOS_DIR": os.environ.get("REPOS_DIR", "./repos"),
         }
-    if not _have_testcontainers():
-        pytest.skip("No NEO4J_URI and testcontainers not installed")
+    if not _have_testcontainers() or not _docker_daemon_reachable():
+        pytest.skip("No NEO4J_URI and Docker daemon not reachable")
     from testcontainers.neo4j import Neo4jContainer
 
     with Neo4jContainer("neo4j:5-community") as container:
@@ -53,9 +79,8 @@ def neo4j_env() -> dict[str, str] | None:
 async def adapter(neo4j_env: dict[str, str] | None):  # type: ignore[no-untyped-def]
     if neo4j_env is None:
         pytest.skip("no neo4j")
-    from codegraph.repo.neo4j_adapter import Neo4jAdapter
-
     from codegraph.config import Settings
+    from codegraph.repo.neo4j_adapter import Neo4jAdapter
 
     s = Settings(**neo4j_env)
     ad = Neo4jAdapter.from_settings(s)
