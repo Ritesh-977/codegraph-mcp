@@ -57,3 +57,26 @@ def test_resolved_path_is_none_when_no_known_files() -> None:
     ef = parse_python("svc.py", _SOURCE)
     for imp in ef.imports:
         assert imp.resolved_path is None  # parser doesn't resolve; resolver does later
+
+
+def test_relative_import_preserves_level_for_resolver() -> None:
+    """`from .sub import x` must reach the resolver as `.sub` (not `sub`)."""
+    src = b"from .sub import x\n"
+    ef = parse_python("pkg/mod.py", src)
+    assert len(ef.imports) == 1
+    assert ef.imports[0].module == ".sub"
+    # Round-trip through the resolver: should hit the relative branch
+    from codegraph.ingestion.resolver import resolve_python_import
+    known = {"pkg/sub/__init__.py", "pkg/__init__.py"}
+    resolved = resolve_python_import(ef.imports[0].module, "pkg/mod.py", known)
+    assert resolved == "pkg/sub/__init__.py"
+
+
+def test_syntax_error_returns_empty_extracted_file() -> None:
+    """Malformed source should not crash the parser — return an empty ExtractedFile."""
+    bad = b"def broken(:\n"
+    ef = parse_python("bad.py", bad)
+    assert ef.path == "bad.py"
+    assert ef.functions == []
+    assert ef.imports == []
+    assert ef.calls == []

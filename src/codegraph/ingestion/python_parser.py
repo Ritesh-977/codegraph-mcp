@@ -13,7 +13,12 @@ from codegraph.models.ingestion import (
 
 
 def parse_python(path: str, source: bytes) -> ExtractedFile:
-    tree = ast.parse(source, filename=path)
+    try:
+        tree = ast.parse(source, filename=path)
+    except SyntaxError:
+        # Malformed source — return an empty ExtractedFile so the ingest
+        # pipeline can skip this file without crashing the whole batch.
+        return ExtractedFile(path=path, language="py")
     functions: list[ExtractedFunction] = []
     imports: list[ExtractedImport] = []
     calls: list[ExtractedCall] = []
@@ -57,7 +62,9 @@ def parse_python(path: str, source: bytes) -> ExtractedFile:
                 imports.append(ExtractedImport(module=alias.name, symbol="", resolved_path=None))
 
         def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
-            mod = node.module or ""
+            # Preserve relative-import level so the resolver's relative branch fires.
+            # `from .sub import x` → module=".sub"; `from . import x` → module="."
+            mod = ("." * node.level) + (node.module or "")
             for alias in node.names:
                 imports.append(ExtractedImport(module=mod, symbol=alias.name, resolved_path=None))
 

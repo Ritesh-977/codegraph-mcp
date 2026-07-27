@@ -37,6 +37,9 @@ def test_walk_skips_gitignore_and_caches() -> None:
     paths = [e.path for e in entries]
     assert not any(p.startswith("__pycache__") for p in paths)
     assert not any(p.startswith(".venv") for p in paths)
+    # Verify pathspec actually exercises .gitignore (not just _SKIP_DIRS):
+    # secrets.env is NOT in _SKIP_DIRS — only .gitignore excludes it.
+    assert "secrets.env" not in paths
 
 
 def test_walk_skips_dot_git() -> None:
