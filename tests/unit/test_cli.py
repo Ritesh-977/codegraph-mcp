@@ -24,11 +24,13 @@ def test_cli_ingest_requires_url(capsys: object) -> None:  # type: ignore[no-unt
     assert exc.value.code == 2  # argparse missing-required-arg exit code
 
 
-def test_cli_ingest_stub_returns_2(capsys: object) -> None:  # type: ignore[no-untyped-def]
+def test_cli_ingest_without_neo4j_returns_1(capsys: object) -> None:  # type: ignore[no-untyped-def]
+    # Ingest is now wired — without a running Neo4j it fails fast at connect()
+    # and returns 1. This proves the code path is live (past the old stub).
     rc = main(["ingest", "https://github.com/o/n"])
-    assert rc == 2
+    assert rc == 1
     out = capsys.readouterr()  # type: ignore[no-untyped-def]
-    assert "not yet implemented" in out.err
+    assert "ingest failed" in out.err
 
 
 def test_cli_serve_stub_returns_2(capsys: object) -> None:  # type: ignore[no-untyped-def]

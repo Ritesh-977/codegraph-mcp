@@ -1,8 +1,10 @@
-"""CLI dispatch — subcommand routing, no business logic."""
+"""CLI dispatch — subcommand routing + ingest orchestration."""
 
 from __future__ import annotations
 
 import argparse
+import asyncio
+import json
 import sys
 
 
@@ -28,6 +30,85 @@ def _build_parser() -> argparse.ArgumentParser:
     return p
 
 
+def _cmd_serve() -> int:
+    print("serve not yet implemented (Day 4)", file=sys.stderr)
+    return 2
+
+
+def _cmd_ls() -> int:
+    print("ls not yet implemented (Day 4)", file=sys.stderr)
+    return 2
+
+
+def _cmd_reset(args: argparse.Namespace) -> int:
+    print("reset not yet implemented (Day 6)", file=sys.stderr)
+    return 2
+
+
+def _cmd_ingest(args: argparse.Namespace) -> int:
+    try:
+        asyncio.run(_ingest_async(args))
+        return 0
+    except Exception as exc:
+        print(f"ingest failed: {exc}", file=sys.stderr)
+        return 1
+
+
+async def _ingest_async(args: argparse.Namespace) -> None:
+    from codegraph.config import Settings
+    from codegraph.ingestion.commits import collect_commits
+    from codegraph.ingestion.git import clone_or_fetch, local_path_for, repo_slug_from_url
+    from codegraph.ingestion.graph_builder import build_ingest_plan, run_plan
+    from codegraph.ingestion.jsts_parser import parse_jsts
+    from codegraph.ingestion.python_parser import parse_python
+    from codegraph.ingestion.walker import walk_repo
+    from codegraph.models.ingestion import ExtractedFile
+    from codegraph.repo.neo4j_adapter import Neo4jAdapter
+
+    settings = Settings()
+    adapter = Neo4jAdapter.from_settings(settings)
+    try:
+        await adapter.connect()
+        await adapter.apply_migrations()
+
+        slug = repo_slug_from_url(args.url)
+        dest = local_path_for(args.url, settings.repos_dir)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        branch = clone_or_fetch(args.url, dest, args.branch, settings.ingest_depth)
+
+        entries = walk_repo(dest)
+        files: list[ExtractedFile] = []
+        for fe in entries:
+            source = fe.abspath.read_bytes()
+            if fe.language == "py":
+                files.append(parse_python(fe.path, source))
+            elif fe.language in ("js", "ts", "tsx"):
+                files.append(parse_jsts(fe.path, source, fe.language))
+
+        commits = collect_commits(dest)
+        known_paths = {ef.path for ef in files}
+        plan = build_ingest_plan(
+            slug=slug,
+            url=args.url,
+            branch=branch,
+            files=files,
+            commits=commits,
+            known_paths=known_paths,
+        )
+        summary = await run_plan(adapter, plan)
+        print(json.dumps({
+            "graph_id": slug,
+            "files": summary.files,
+            "functions": summary.functions,
+            "imports": summary.imports,
+            "calls": summary.calls,
+            "external_symbols": summary.external_symbols,
+            "pruned": summary.pruned,
+        }))
+    finally:
+        await adapter.close()
+
+
 def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
     if args.version:
@@ -37,19 +118,11 @@ def main(argv: list[str] | None = None) -> int:
         print("codegraph — run `codegraph --help` for usage", file=sys.stderr)
         return 0
     if args.cmd == "ingest":
-        # Implemented in Day 3 (after parsers + graph_builder land).
-        print(f"ingest not yet implemented (url={args.url})", file=sys.stderr)
-        return 2
+        return _cmd_ingest(args)
     if args.cmd == "serve":
-        # Implemented in Day 4.
-        print("serve not yet implemented", file=sys.stderr)
-        return 2
+        return _cmd_serve()
     if args.cmd == "reset":
-        # Implemented in Day 3.
-        print("reset not yet implemented", file=sys.stderr)
-        return 2
+        return _cmd_reset(args)
     if args.cmd == "ls":
-        # Implemented in Day 4.
-        print("ls not yet implemented", file=sys.stderr)
-        return 2
+        return _cmd_ls()
     return 0
