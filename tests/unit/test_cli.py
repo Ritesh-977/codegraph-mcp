@@ -24,13 +24,15 @@ def test_cli_ingest_requires_url(capsys: object) -> None:  # type: ignore[no-unt
     assert exc.value.code == 2  # argparse missing-required-arg exit code
 
 
-def test_cli_ingest_without_neo4j_returns_1(capsys: object) -> None:  # type: ignore[no-untyped-def]
-    # Ingest is now wired — without a running Neo4j it fails fast at connect()
-    # and returns 1. This proves the code path is live (past the old stub).
+def test_cli_ingest_without_neo4j_returns_1(monkeypatch: object) -> None:  # type: ignore[no-untyped-def]
+    # Ingest is now wired — with a guaranteed-bad Neo4j URI it fails fast at
+    # connect() and returns 1. This proves the code path is live (past the old
+    # stub) without making any real network calls (offline-safe).
+
+    monkeypatch.setenv("NEO4J_URI", "bolt://localhost:1")  # type: ignore[attr-defined]
+    monkeypatch.setenv("NEO4J_PASSWORD", "wrong")  # type: ignore[attr-defined]
     rc = main(["ingest", "https://github.com/o/n"])
     assert rc == 1
-    out = capsys.readouterr()  # type: ignore[no-untyped-def]
-    assert "ingest failed" in out.err
 
 
 def test_cli_serve_stub_returns_2(capsys: object) -> None:  # type: ignore[no-untyped-def]

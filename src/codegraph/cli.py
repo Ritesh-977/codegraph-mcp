@@ -80,10 +80,14 @@ async def _ingest_async(args: argparse.Namespace) -> None:
         files: list[ExtractedFile] = []
         for fe in entries:
             source = fe.abspath.read_bytes()
-            if fe.language == "py":
-                files.append(parse_python(fe.path, source))
-            elif fe.language in ("js", "ts", "tsx"):
-                files.append(parse_jsts(fe.path, source, fe.language))
+            try:
+                if fe.language == "py":
+                    files.append(parse_python(fe.path, source))
+                elif fe.language in ("js", "ts", "tsx"):
+                    files.append(parse_jsts(fe.path, source, fe.language))
+            except Exception as parse_exc:
+                # Don't let one malformed file kill the whole ingest run
+                print(f"WARNING: skipping {fe.path}: {parse_exc}", file=sys.stderr)
 
         commits = collect_commits(dest)
         known_paths = {ef.path for ef in files}

@@ -39,3 +39,20 @@ def test_extracts_call() -> None:
     ef = parse_jsts("svc.ts", _TS_SOURCE, "ts")
     callees = {c.callee_name for c in ef.calls}
     assert "authenticate" in callees
+
+
+def test_qualified_name_is_file_scoped() -> None:
+    """Two files defining the same function name should NOT collide."""
+    ef = parse_jsts("svc.ts", _TS_SOURCE, "ts")
+    qnames = {f.qualified_name for f in ef.functions}
+    assert "svc.ts::main" in qnames
+    assert "svc.ts::UserService" in qnames
+
+
+def test_caller_qname_traces_to_enclosing_function() -> None:
+    """Calls inside a function should attribute caller_qname to that function."""
+    ef = parse_jsts("svc.ts", _TS_SOURCE, "ts")
+    # `authenticate("admin")` is called inside `main()` → caller should be svc.ts::main
+    auth_calls = [c for c in ef.calls if c.callee_name == "authenticate"]
+    assert auth_calls
+    assert auth_calls[0].caller_qname == "svc.ts::main"

@@ -51,15 +51,16 @@ def parse_jsts(path: str, source: bytes, language: str) -> ExtractedFile:
     calls: list[ExtractedCall] = []
 
     for node in _cap(captures, "fn.name"):
-        functions.append(_mk_func(node, source, "function"))
+        functions.append(_mk_func(node, source, "function", path))
     for node in _cap(captures, "meth.name"):
-        functions.append(_mk_func(node, source, "method"))
+        functions.append(_mk_func(node, source, "method", path))
     for node in _cap(captures, "cls.name"):
-        functions.append(_mk_func(node, source, "class"))
+        functions.append(_mk_func(node, source, "class", path))
     for imp_node in _cap(captures, "imp.stmt"):
         imports.extend(_imports_from(imp_node, source))
     for call_node in _cap(captures, "call.name"):
-        calls.append(ExtractedCall(caller_qname="<module>", callee_name=_text(call_node, source)))
+        caller = _find_enclosing_func(call_node, source, path)
+        calls.append(ExtractedCall(caller_qname=caller, callee_name=_text(call_node, source)))
 
     return ExtractedFile(
         path=path, language=language, functions=functions, imports=imports, calls=calls
@@ -81,14 +82,18 @@ def _text(node: Any, source: bytes) -> str:
     return source[node.start_byte:node.end_byte].decode("utf-8", errors="replace")
 
 
-def _mk_func(name_node: Any, source: bytes, kind: str) -> ExtractedFunction:
+def _mk_func(name_node: Any, source: bytes, kind: str, file_path: str) -> ExtractedFunction:
     name = _text(name_node, source)
+    # Scope qualified_name per-file to avoid cross-file collisions
+    # (two files each defining `function authenticate` would otherwise MERGE
+    # into one Function node).
+    qualified = f"{file_path}::{name}"
     parent = name_node.parent
     start = (parent.start_point[0] + 1) if parent else (name_node.start_point[0] + 1)
     end = (parent.end_point[0] + 1) if parent else (name_node.end_point[0] + 1)
     return ExtractedFunction(
         name=name,
-        qualified_name=name,
+        qualified_name=qualified,
         kind=kind,
         start_line=start,
         end_line=end,
@@ -119,3 +124,22 @@ def _walk(node: Any) -> Iterator[Any]:
     yield node
     for c in node.children:
         yield from _walk(c)
+
+
+def _find_enclosing_func(call_node: Any, source: bytes, file_path: str) -> str:
+    """Walk ancestors of a call_expression to find the enclosing function/method.
+
+    Returns the qualified_name of the enclosing function, or "<module>" if the
+    call is at the top level (not inside any function).
+    """
+    node = call_node.parent
+    while node is not None:
+        ntype = node.type
+        if ntype in ("function_declaration", "method_definition", "class_declaration"):
+            # Find the name child
+            for child in node.children:
+                if child.type in ("identifier", "property_identifier", "type_identifier"):
+                    name = _text(child, source)
+                    return f"{file_path}::{name}"
+        node = node.parent
+    return "<module>"

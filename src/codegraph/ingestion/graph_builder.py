@@ -124,7 +124,8 @@ def build_ingest_plan(
     plan.append((
         "MATCH (f:File {graph_id: $gid}) "
         "WHERE NOT f.path IN $paths AND f.deleted = false "
-        "SET f.deleted = true",
+        "SET f.deleted = true "
+        "WITH count(f) AS c RETURN c",
         {"gid": slug, "paths": list(known_paths)},
     ))
 
@@ -138,22 +139,25 @@ def _resolve(module: str, current_file: str, language: str, known: set[str]) -> 
 
 
 def _resolve_call(callee_name: str, all_qnames: set[str]) -> str | None:
-    """Naive: match any qualified_name ending in .<callee_name> or equal to it."""
+    """Naive: match any qualified_name ending in .<callee_name>, ::<callee_name>, or equal to it."""
     for qn in all_qnames:
-        if qn == callee_name or qn.endswith("." + callee_name):
+        if qn == callee_name or qn.endswith("." + callee_name) or qn.endswith("::" + callee_name):
             return qn
     return None
 
 
 async def run_plan(adapter: Any, plan: list[tuple[str, dict[str, Any]]]) -> IngestSummary:
     """Execute the plan against the adapter and return counts."""
+    pruned = 0
     for cypher, params in plan:
-        await adapter._run_write(cypher, **params)
+        rows = await adapter._run_write(cypher, **params)
+        # The prune statement returns a count via RETURN — capture it
+        if "deleted = true" in cypher and rows:
+            pruned = int(rows[0].get("c", 0)) if rows else 0
     files = sum(1 for c, _ in plan if "MERGE (f:File" in c)
     functions = sum(1 for c, _ in plan if "MERGE (fn:Function" in c)
     imports = sum(1 for c, _ in plan if "[:IMPORTS]" in c)
     calls = sum(1 for c, _ in plan if "[:CALLS]" in c)
     external_symbols = sum(1 for c, _ in plan if "MERGE (s:Symbol" in c)
-    pruned = 0
     return IngestSummary(files=files, functions=functions, imports=imports,
                          calls=calls, external_symbols=external_symbols, pruned=pruned)
