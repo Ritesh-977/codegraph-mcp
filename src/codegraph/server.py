@@ -20,8 +20,11 @@ from mcp.types import CallToolResult, TextContent
 from codegraph.config import Settings
 from codegraph.logging_setup import setup_logging
 from codegraph.models.tools import (
+    FindFileDependenciesArgs,
+    GetNodeDetailArgs,
     GetRepoStructureArgs,
     InitRepositoryNodeArgs,
+    SearchNodesArgs,
 )
 from codegraph.repo.neo4j_adapter import Neo4jAdapter
 
@@ -75,7 +78,10 @@ async def list_repos(
     from codegraph.tools.list_repos import list_repos as _impl
 
     state = get_state(ctx)
-    result = await _impl(state.adapter)
+    try:
+        result = await _impl(state.adapter)
+    except Exception as ex:
+        raise ToolError(f"Failed to list repos: {ex}. Check Neo4j is running.") from ex
     lines = [f"{len(result.repos)} repo(s) available:"]
     for r in result.repos:
         lines.append(f"  - graph_id: {r.graph_id}  (name: {r.name}, branch: {r.default_branch})")
@@ -99,6 +105,8 @@ async def init_repository_node(
         result = await _impl(state.adapter, InitRepositoryNodeArgs(graph_id=graph_id))
     except ValueError as ex:
         raise ToolError(str(ex)) from ex
+    except Exception as ex:
+        raise ToolError(f"Failed to query repo '{graph_id}': {ex}. Check Neo4j is running.") from ex
     summary = f"Repository '{result.graph_id}': {result.file_count} files, {result.function_count} functions (url: {result.url})"
     return CallToolResult(
         content=[TextContent(type="text", text=summary)],
@@ -117,7 +125,10 @@ async def get_repo_structure(
     from codegraph.tools.get_repo_structure import get_repo_structure as _impl
 
     state = get_state(ctx)
-    result = await _impl(state.adapter, GetRepoStructureArgs(graph_id=graph_id, path=path, limit=limit))
+    try:
+        result = await _impl(state.adapter, GetRepoStructureArgs(graph_id=graph_id, path=path, limit=limit))
+    except Exception as ex:
+        raise ToolError(f"Failed to get structure for '{graph_id}/{path}': {ex}. Check the repo is ingested.") from ex
     lines = [f"Path '{result.path}' in '{graph_id}': {len(result.entries)} entries" + (" [truncated]" if result.truncated else "")]
     for e in result.entries:
         if e.type == "dir":
@@ -125,6 +136,115 @@ async def get_repo_structure(
         else:
             lines.append(f"  [file] {e.name}  ({e.language})")
     summary = "\n".join(lines)
+    return CallToolResult(
+        content=[TextContent(type="text", text=summary)],
+        structuredContent=result.model_dump(),
+    )
+
+
+@mcp.tool()
+async def find_file_dependencies(
+    ctx: Context[ServerSession, AppState],
+    graph_id: str,
+    file_path: str,
+    direction: str = "both",
+    max_hops: int = 2,
+) -> CallToolResult:
+    """Find what files/functions depend on (or are depended on by) a given file.
+    Use this to answer 'what breaks if I edit X?'. Returns imported_by, imports,
+    callers, calls, and external symbols (stdlib/npm)."""
+    from codegraph.tools.find_file_dependencies import find_file_dependencies as _impl
+
+    state = get_state(ctx)
+    try:
+        result = await _impl(state.adapter, FindFileDependenciesArgs(
+            graph_id=graph_id, file_path=file_path, direction=direction, max_hops=max_hops
+        ))
+    except Exception as ex:
+        raise ToolError(f"Failed to find dependencies for '{file_path}' in '{graph_id}': {ex}") from ex
+    lines = [f"Dependencies for '{file_path}' in '{graph_id}':"]
+    if result.imported_by:
+        lines.append(f"  Imported by ({len(result.imported_by)}):")
+        for d in result.imported_by:
+            lines.append(f"    - {d.path} ({d.kind}, via {d.via})")
+    if result.imports:
+        lines.append(f"  Imports ({len(result.imports)}):")
+        for d in result.imports:
+            lines.append(f"    - {d.path} ({d.kind}, via {d.via})")
+    if result.callers:
+        lines.append(f"  Called by ({len(result.callers)}):")
+        for d in result.callers:
+            lines.append(f"    - {d.path} ({d.kind}, via {d.via})")
+    if result.calls:
+        lines.append(f"  Calls ({len(result.calls)}):")
+        for d in result.calls:
+            lines.append(f"    - {d.path} ({d.kind}, via {d.via})")
+    if result.external_symbols:
+        lines.append(f"  External symbols ({len(result.external_symbols)}):")
+        for s in result.external_symbols:
+            lines.append(f"    - {s.name} ({s.kind})")
+    if not any([result.imported_by, result.imports, result.callers, result.calls, result.external_symbols]):
+        lines.append("  No dependencies found.")
+    summary = "\n".join(lines)
+    return CallToolResult(
+        content=[TextContent(type="text", text=summary)],
+        structuredContent=result.model_dump(),
+    )
+
+
+@mcp.tool()
+async def search_nodes(
+    ctx: Context[ServerSession, AppState],
+    graph_id: str,
+    query: str,
+    kind: str = "any",
+    limit: int = 10,
+) -> CallToolResult:
+    """Search for functions or files by name. Use this before find_file_dependencies
+    or get_node_detail to find the exact path or node id."""
+    from codegraph.tools.search_nodes import search_nodes as _impl
+
+    state = get_state(ctx)
+    try:
+        result = await _impl(state.adapter, SearchNodesArgs(
+            graph_id=graph_id, query=query, kind=kind, limit=limit
+        ))
+    except Exception as ex:
+        raise ToolError(f"Search failed for '{query}' in '{graph_id}': {ex}") from ex
+    lines = [f"Search '{query}' in '{graph_id}' ({kind}): {len(result.hits)} hit(s)"]
+    for h in result.hits:
+        lines.append(f"  - {h.name}  (kind: {h.kind}, path: {h.path})")
+    summary = "\n".join(lines)
+    return CallToolResult(
+        content=[TextContent(type="text", text=summary)],
+        structuredContent=result.model_dump(),
+    )
+
+
+@mcp.tool()
+async def get_node_detail(
+    ctx: Context[ServerSession, AppState],
+    graph_id: str,
+    node_id: str,
+) -> CallToolResult:
+    """Get detailed information about a single node (function/file) by its id.
+    Returns name, kind, path, and line range. Use search_nodes to find the node id first."""
+    from codegraph.tools.get_node_detail import get_node_detail as _impl
+
+    state = get_state(ctx)
+    try:
+        result = await _impl(state.adapter, GetNodeDetailArgs(
+            graph_id=graph_id, node_id=node_id
+        ))
+    except ValueError as ex:
+        raise ToolError(str(ex)) from ex
+    except Exception as ex:
+        raise ToolError(f"Failed to get node '{node_id}' in '{graph_id}': {ex}") from ex
+    summary = f"Node '{result.name}' (kind: {result.kind})"
+    if result.path:
+        summary += f"  path: {result.path}"
+    if result.start_line:
+        summary += f"  lines: {result.start_line}-{result.end_line}"
     return CallToolResult(
         content=[TextContent(type="text", text=summary)],
         structuredContent=result.model_dump(),

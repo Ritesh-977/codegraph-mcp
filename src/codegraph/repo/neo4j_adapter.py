@@ -102,17 +102,104 @@ class Neo4jAdapter:
     async def find_file_dependencies(
         self, *, graph_id: str, file_path: str, direction: str, max_hops: int
     ) -> dict[str, Any]:
-        raise NotImplementedError("Day 5")
+        # imported_by: files that IMPORT this file
+        imported_by = await self._run_read(
+            "MATCH (src:File {graph_id: $gid})-[:IMPORTS]->(tgt:File {graph_id: $gid, path: $p}) "
+            "WHERE src.deleted = false "
+            "RETURN src.path AS path, 'file' AS kind, 'imported_by' AS via, 1 AS hop",
+            gid=graph_id, p=file_path,
+        ) if direction in ("imported_by", "both") else []
+
+        # imports: files this file IMPORTS
+        imports = await self._run_read(
+            "MATCH (src:File {graph_id: $gid, path: $p})-[:IMPORTS]->(tgt:File {graph_id: $gid}) "
+            "WHERE tgt.deleted = false "
+            "RETURN tgt.path AS path, 'file' AS kind, 'imports' AS via, 1 AS hop",
+            gid=graph_id, p=file_path,
+        ) if direction in ("imports", "both") else []
+
+        # callers: functions in OTHER files that CALL a function defined in this file
+        callers = await self._run_read(
+            "MATCH (caller:Function {graph_id: $gid})-[:CALLS]->(callee:Function {graph_id: $gid}) "
+            "WHERE callee.qualified_name STARTS WITH $pfx "
+            "RETURN caller.qualified_name AS path, 'function' AS kind, 'called_by' AS via, 1 AS hop",
+            gid=graph_id, pfx=file_path + "::",
+        ) if direction in ("imported_by", "both") else []
+
+        # calls: functions this file's functions CALL
+        calls = await self._run_read(
+            "MATCH (caller:Function {graph_id: $gid})-[:CALLS]->(callee:Function {graph_id: $gid}) "
+            "WHERE caller.qualified_name STARTS WITH $pfx "
+            "RETURN callee.qualified_name AS path, 'function' AS kind, 'calls' AS via, 1 AS hop",
+            gid=graph_id, pfx=file_path + "::",
+        ) if direction in ("imports", "both") else []
+
+        # external symbols (unresolved imports/calls)
+        ext = await self._run_read(
+            "MATCH (f:File {graph_id: $gid, path: $p})-[:IMPORTS|:CALLS]->(s:Symbol {graph_id: $gid}) "
+            "RETURN s.name AS name, s.kind AS kind",
+            gid=graph_id, p=file_path,
+        )
+
+        return {
+            "file": {"path": file_path, "graph_id": graph_id},
+            "imported_by": imported_by,
+            "imports": imports,
+            "callers": callers,
+            "calls": calls,
+            "external_symbols": ext,
+            "truncated": False,
+            "hint": None,
+        }
 
     async def search_nodes(
         self, *, graph_id: str, query: str, kind: str, limit: int
     ) -> list[dict[str, Any]]:
-        raise NotImplementedError("Day 5")
+        q = query.lower()
+        if kind == "function":
+            cypher = (
+                "MATCH (fn:Function {graph_id: $gid}) WHERE toLower(fn.name) CONTAINS $q "
+                "RETURN fn.qualified_name AS qualified_name, fn.name AS name, fn.kind AS kind, '' AS path, 1.0 AS score "
+                "LIMIT $lim"
+            )
+        elif kind == "file":
+            cypher = (
+                "MATCH (f:File {graph_id: $gid}) WHERE f.deleted = false AND toLower(f.path) CONTAINS $q "
+                "RETURN '' AS qualified_name, f.path AS name, 'file' AS kind, f.path AS path, 1.0 AS score "
+                "LIMIT $lim"
+            )
+        else:
+            cypher = (
+                "MATCH (n {graph_id: $gid}) WHERE "
+                "(n:Function AND toLower(n.name) CONTAINS $q) "
+                "OR (n:File AND n.deleted = false AND toLower(n.path) CONTAINS $q) "
+                "RETURN coalesce(n.qualified_name, '') AS qualified_name, "
+                "coalesce(n.name, n.path) AS name, "
+                "CASE WHEN n:Function THEN 'function' WHEN n:File THEN 'file' ELSE 'other' END AS kind, "
+                "coalesce(n.path, '') AS path, 1.0 AS score LIMIT $lim"
+            )
+        return await self._run_read(cypher, gid=graph_id, q=q, lim=limit)
 
     async def get_node_detail(
         self, *, graph_id: str, node_id: str
     ) -> dict[str, Any] | None:
-        raise NotImplementedError("Day 5")
+        rows = await self._run_read(
+            "MATCH (n {graph_id: $gid}) WHERE elementId(n) = $nid "
+            "RETURN elementId(n) AS id, coalesce(n.name, n.path) AS name, "
+            "CASE WHEN n:Function THEN n.kind WHEN n:File THEN 'file' ELSE 'other' END AS kind, "
+            "coalesce(n.path, '') AS path, n.start_line AS sl, n.end_line AS el",
+            gid=graph_id, nid=node_id,
+        )
+        if not rows:
+            return None
+        return {
+            "id": rows[0]["id"],
+            "name": rows[0]["name"],
+            "kind": rows[0]["kind"],
+            "path": rows[0]["path"] or None,
+            "start_line": rows[0].get("sl"),
+            "end_line": rows[0].get("el"),
+        }
 
     # --- low-level exec used by graph_builder + tests ---
 
