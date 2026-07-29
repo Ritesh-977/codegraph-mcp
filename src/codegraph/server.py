@@ -76,7 +76,10 @@ async def list_repos(
 
     state = get_state(ctx)
     result = await _impl(state.adapter)
-    summary = f"{len(result.repos)} repos"
+    lines = [f"{len(result.repos)} repo(s) available:"]
+    for r in result.repos:
+        lines.append(f"  - graph_id: {r.graph_id}  (name: {r.name}, branch: {r.default_branch})")
+    summary = "\n".join(lines) if result.repos else "No repos ingested. Run: python -m codegraph ingest <github-url>"
     return CallToolResult(
         content=[TextContent(type="text", text=summary)],
         structuredContent=result.model_dump(),
@@ -96,7 +99,7 @@ async def init_repository_node(
         result = await _impl(state.adapter, InitRepositoryNodeArgs(graph_id=graph_id))
     except ValueError as ex:
         raise ToolError(str(ex)) from ex
-    summary = f"{result.file_count} files, {result.function_count} functions"
+    summary = f"Repository '{result.graph_id}': {result.file_count} files, {result.function_count} functions (url: {result.url})"
     return CallToolResult(
         content=[TextContent(type="text", text=summary)],
         structuredContent=result.model_dump(),
@@ -115,7 +118,13 @@ async def get_repo_structure(
 
     state = get_state(ctx)
     result = await _impl(state.adapter, GetRepoStructureArgs(graph_id=graph_id, path=path, limit=limit))
-    summary = f"{len(result.entries)} entries" + (" [truncated]" if result.truncated else "")
+    lines = [f"Path '{result.path}' in '{graph_id}': {len(result.entries)} entries" + (" [truncated]" if result.truncated else "")]
+    for e in result.entries:
+        if e.type == "dir":
+            lines.append(f"  [dir]  {e.name}/")
+        else:
+            lines.append(f"  [file] {e.name}  ({e.language})")
+    summary = "\n".join(lines)
     return CallToolResult(
         content=[TextContent(type="text", text=summary)],
         structuredContent=result.model_dump(),
