@@ -76,7 +76,28 @@ class Neo4jAdapter:
     async def get_repo_structure(
         self, *, graph_id: str, path: str, limit: int
     ) -> dict[str, Any]:
-        raise NotImplementedError("Day 4")
+        prefix = (path + "/") if path else ""
+        rows = await self._run_read(
+            "MATCH (f:File {graph_id: $gid}) "
+            "WHERE f.deleted = false AND ($prefix = '' OR f.path STARTS WITH $prefix) "
+            "RETURN f.path AS p, f.language AS lang "
+            "ORDER BY f.path LIMIT $lim",
+            gid=graph_id, prefix=prefix, lim=limit + 1,
+        )
+        entries: list[dict[str, Any]] = []
+        seen_dirs: set[str] = set()
+        for r in rows:
+            rel = r["p"][len(prefix):] if prefix else r["p"]
+            parts = rel.split("/")
+            if len(parts) == 1:
+                entries.append({"name": parts[0], "type": "file", "language": r["lang"]})
+            else:
+                d = parts[0]
+                if d not in seen_dirs:
+                    seen_dirs.add(d)
+                    entries.append({"name": d, "type": "dir"})
+        truncated = len(rows) > limit
+        return {"path": path, "entries": entries[:limit], "truncated": truncated}
 
     async def find_file_dependencies(
         self, *, graph_id: str, file_path: str, direction: str, max_hops: int

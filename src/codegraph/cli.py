@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import contextlib
 import json
 import sys
 
@@ -31,13 +32,34 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def _cmd_serve() -> int:
-    print("serve not yet implemented (Day 4)", file=sys.stderr)
-    return 2
+    from codegraph.server import serve
+    return serve()
 
 
 def _cmd_ls() -> int:
-    print("ls not yet implemented (Day 4)", file=sys.stderr)
-    return 2
+    import asyncio
+
+    from codegraph.config import Settings
+    from codegraph.repo.neo4j_adapter import Neo4jAdapter
+
+    async def _go() -> int:
+        s = Settings()
+        ad = Neo4jAdapter.from_settings(s)
+        try:
+            await ad.connect()
+            repos = await ad.list_repos()
+            for r in repos:
+                print(f"{r['graph_id']}\t{r.get('url', '')}")
+        finally:
+            with contextlib.suppress(Exception):
+                await ad.close()
+        return 0
+
+    try:
+        return asyncio.run(_go())
+    except Exception as exc:
+        print(f"ls failed: {exc}", file=sys.stderr)
+        return 1
 
 
 def _cmd_reset(args: argparse.Namespace) -> int:

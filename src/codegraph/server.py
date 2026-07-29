@@ -1,0 +1,128 @@
+"""FastMCP server — registers read-only tools against a Neo4j-backed repository.
+
+NOTE: This module intentionally does NOT use `from __future__ import annotations`.
+The `mcp dev` Inspector loads server.py via importlib without registering it in
+sys.modules first; with PEP 563 string annotations, @dataclass would fail to
+resolve type hints.
+"""
+
+import contextlib
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+from dataclasses import dataclass
+from typing import Any
+
+from mcp.server.fastmcp import Context, FastMCP
+from mcp.server.fastmcp.exceptions import ToolError
+from mcp.server.session import ServerSession
+from mcp.types import CallToolResult, TextContent
+
+from codegraph.config import Settings
+from codegraph.logging_setup import setup_logging
+from codegraph.models.tools import (
+    GetRepoStructureArgs,
+    InitRepositoryNodeArgs,
+)
+from codegraph.repo.neo4j_adapter import Neo4jAdapter
+
+
+@dataclass
+class AppState:
+    adapter: Neo4jAdapter
+
+
+@asynccontextmanager
+async def app_lifespan(server: FastMCP) -> AsyncIterator[AppState]:
+    settings = Settings()
+    setup_logging(settings.log_level)
+    adapter = Neo4jAdapter.from_settings(settings)
+    try:
+        await adapter.connect()
+        await adapter.apply_migrations()
+    except Exception as ex:
+        with contextlib.suppress(Exception):
+            await adapter.close()
+        raise RuntimeError(f"failed to initialize codegraph backend: {ex}") from ex
+    try:
+        yield AppState(adapter=adapter)
+    finally:
+        with contextlib.suppress(Exception):
+            await adapter.close()
+
+
+mcp: FastMCP = FastMCP(
+    name="codegraph",
+    instructions=(
+        "Code dependency graph MCP server. Always: (1) call list_repos first to "
+        "see available graphs; (2) call init_repository_node with a graph_id to "
+        "confirm a repo exists and get file/function counts; (3) use search_nodes "
+        "to find files/functions by name before calling find_file_dependencies."
+    ),
+    lifespan=app_lifespan,
+)
+
+
+def get_state(ctx: Any) -> AppState:
+    """Pull AppState from a FastMCP Context's lifespan context."""
+    return ctx.request_context.lifespan_context  # type: ignore[no-any-return]
+
+
+@mcp.tool()
+async def list_repos(
+    ctx: Context[ServerSession, AppState],
+) -> CallToolResult:
+    """List all ingested repositories in the graph database."""
+    from codegraph.tools.list_repos import list_repos as _impl
+
+    state = get_state(ctx)
+    result = await _impl(state.adapter)
+    summary = f"{len(result.repos)} repos"
+    return CallToolResult(
+        content=[TextContent(type="text", text=summary)],
+        structuredContent=result.model_dump(),
+    )
+
+
+@mcp.tool()
+async def init_repository_node(
+    ctx: Context[ServerSession, AppState],
+    graph_id: str,
+) -> CallToolResult:
+    """Confirm a repository's graph exists and return file/function counts."""
+    from codegraph.tools.init_repository_node import init_repository_node as _impl
+
+    state = get_state(ctx)
+    try:
+        result = await _impl(state.adapter, InitRepositoryNodeArgs(graph_id=graph_id))
+    except ValueError as ex:
+        raise ToolError(str(ex)) from ex
+    summary = f"{result.file_count} files, {result.function_count} functions"
+    return CallToolResult(
+        content=[TextContent(type="text", text=summary)],
+        structuredContent=result.model_dump(),
+    )
+
+
+@mcp.tool()
+async def get_repo_structure(
+    ctx: Context[ServerSession, AppState],
+    graph_id: str,
+    path: str = "",
+    limit: int = 200,
+) -> CallToolResult:
+    """List files and directories under a path in a repository."""
+    from codegraph.tools.get_repo_structure import get_repo_structure as _impl
+
+    state = get_state(ctx)
+    result = await _impl(state.adapter, GetRepoStructureArgs(graph_id=graph_id, path=path, limit=limit))
+    summary = f"{len(result.entries)} entries" + (" [truncated]" if result.truncated else "")
+    return CallToolResult(
+        content=[TextContent(type="text", text=summary)],
+        structuredContent=result.model_dump(),
+    )
+
+
+def serve() -> int:
+    """Run the MCP server over stdio transport."""
+    mcp.run(transport="stdio")
+    return 0
