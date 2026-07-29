@@ -34,8 +34,14 @@ class AppState:
     adapter: Neo4jAdapter
 
 
+# Module-level handle to the active AppState. Set by the lifespan so resource
+# functions (which FastMCP does not pass a ctx to) can reach the adapter.
+_ACTIVE_STATE: AppState | None = None
+
+
 @asynccontextmanager
 async def app_lifespan(server: FastMCP) -> AsyncIterator[AppState]:
+    global _ACTIVE_STATE
     settings = Settings()
     setup_logging(settings.log_level)
     adapter = Neo4jAdapter.from_settings(settings)
@@ -46,11 +52,21 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[AppState]:
         with contextlib.suppress(Exception):
             await adapter.close()
         raise RuntimeError(f"failed to initialize codegraph backend: {ex}") from ex
+    state = AppState(adapter=adapter)
+    _ACTIVE_STATE = state
     try:
-        yield AppState(adapter=adapter)
+        yield state
     finally:
+        _ACTIVE_STATE = None
         with contextlib.suppress(Exception):
             await adapter.close()
+
+
+def _state() -> AppState:
+    """Return the active AppState, or raise if the server has not started yet."""
+    if _ACTIVE_STATE is None:
+        raise RuntimeError("codegraph server has not started — AppState unavailable.")
+    return _ACTIVE_STATE
 
 
 mcp: FastMCP = FastMCP(
@@ -85,7 +101,11 @@ async def list_repos(
     lines = [f"{len(result.repos)} repo(s) available:"]
     for r in result.repos:
         lines.append(f"  - graph_id: {r.graph_id}  (name: {r.name}, branch: {r.default_branch})")
-    summary = "\n".join(lines) if result.repos else "No repos ingested. Run: python -m codegraph ingest <github-url>"
+    summary = (
+        "\n".join(lines)
+        if result.repos
+        else "No repos ingested. Run: python -m codegraph ingest <github-url>"
+    )
     return CallToolResult(
         content=[TextContent(type="text", text=summary)],
         structuredContent=result.model_dump(),
@@ -126,10 +146,17 @@ async def get_repo_structure(
 
     state = get_state(ctx)
     try:
-        result = await _impl(state.adapter, GetRepoStructureArgs(graph_id=graph_id, path=path, limit=limit))
+        result = await _impl(
+            state.adapter, GetRepoStructureArgs(graph_id=graph_id, path=path, limit=limit)
+        )
     except Exception as ex:
-        raise ToolError(f"Failed to get structure for '{graph_id}/{path}': {ex}. Check the repo is ingested.") from ex
-    lines = [f"Path '{result.path}' in '{graph_id}': {len(result.entries)} entries" + (" [truncated]" if result.truncated else "")]
+        raise ToolError(
+            f"Failed to get structure for '{graph_id}/{path}': {ex}. Check the repo is ingested."
+        ) from ex
+    lines = [
+        f"Path '{result.path}' in '{graph_id}': {len(result.entries)} entries"
+        + (" [truncated]" if result.truncated else "")
+    ]
     for e in result.entries:
         if e.type == "dir":
             lines.append(f"  [dir]  {e.name}/")
@@ -157,11 +184,16 @@ async def find_file_dependencies(
 
     state = get_state(ctx)
     try:
-        result = await _impl(state.adapter, FindFileDependenciesArgs(
-            graph_id=graph_id, file_path=file_path, direction=direction, max_hops=max_hops
-        ))
+        result = await _impl(
+            state.adapter,
+            FindFileDependenciesArgs(
+                graph_id=graph_id, file_path=file_path, direction=direction, max_hops=max_hops
+            ),
+        )
     except Exception as ex:
-        raise ToolError(f"Failed to find dependencies for '{file_path}' in '{graph_id}': {ex}") from ex
+        raise ToolError(
+            f"Failed to find dependencies for '{file_path}' in '{graph_id}': {ex}"
+        ) from ex
     lines = [f"Dependencies for '{file_path}' in '{graph_id}':"]
     if result.imported_by:
         lines.append(f"  Imported by ({len(result.imported_by)}):")
@@ -183,7 +215,9 @@ async def find_file_dependencies(
         lines.append(f"  External symbols ({len(result.external_symbols)}):")
         for s in result.external_symbols:
             lines.append(f"    - {s.name} ({s.kind})")
-    if not any([result.imported_by, result.imports, result.callers, result.calls, result.external_symbols]):
+    if not any(
+        [result.imported_by, result.imports, result.callers, result.calls, result.external_symbols]
+    ):
         lines.append("  No dependencies found.")
     summary = "\n".join(lines)
     return CallToolResult(
@@ -206,9 +240,9 @@ async def search_nodes(
 
     state = get_state(ctx)
     try:
-        result = await _impl(state.adapter, SearchNodesArgs(
-            graph_id=graph_id, query=query, kind=kind, limit=limit
-        ))
+        result = await _impl(
+            state.adapter, SearchNodesArgs(graph_id=graph_id, query=query, kind=kind, limit=limit)
+        )
     except Exception as ex:
         raise ToolError(f"Search failed for '{query}' in '{graph_id}': {ex}") from ex
     lines = [f"Search '{query}' in '{graph_id}' ({kind}): {len(result.hits)} hit(s)"]
@@ -233,9 +267,7 @@ async def get_node_detail(
 
     state = get_state(ctx)
     try:
-        result = await _impl(state.adapter, GetNodeDetailArgs(
-            graph_id=graph_id, node_id=node_id
-        ))
+        result = await _impl(state.adapter, GetNodeDetailArgs(graph_id=graph_id, node_id=node_id))
     except ValueError as ex:
         raise ToolError(str(ex)) from ex
     except Exception as ex:
@@ -249,6 +281,24 @@ async def get_node_detail(
         content=[TextContent(type="text", text=summary)],
         structuredContent=result.model_dump(),
     )
+
+
+@mcp.resource("codegraph://repos")
+async def repos_resource() -> dict[str, Any]:
+    """List all ingested repositories — read this at session start to ground yourself."""
+    from codegraph.resources import read_repos_resource
+
+    state = _state()
+    return await read_repos_resource(state.adapter)
+
+
+@mcp.resource("codegraph://schema/{graph_id}")
+async def schema_resource(graph_id: str) -> dict[str, Any]:
+    """Schema for a specific repo — labels, edges, and repo info."""
+    from codegraph.resources import read_schema_resource
+
+    state = _state()
+    return await read_schema_resource(state.adapter, graph_id)
 
 
 def serve() -> int:
