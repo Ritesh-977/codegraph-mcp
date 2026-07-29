@@ -55,7 +55,7 @@ class Neo4jAdapter:
             "RETURN r.graph_id AS graph_id, r.name AS name, r.url AS url, "
             "       r.default_branch AS default_branch, r.ingested_at AS ingested_at"
         )
-        return [dict(r) for r in rows]
+        return [_normalize_repo_row(r) for r in rows]
 
     async def get_repo_info(self, *, graph_id: str) -> dict[str, Any] | None:
         rows = await self._run_read(
@@ -69,7 +69,7 @@ class Neo4jAdapter:
         )
         if not rows or rows[0].get("graph_id") is None:
             return None
-        return dict(rows[0])
+        return _normalize_repo_row(rows[0])
 
     # --- read methods implemented in Day 4/5 ---
 
@@ -135,3 +135,19 @@ class Neo4jAdapter:
         await self._run_write(
             "MATCH (n {graph_id: $gid}) DETACH DELETE n", gid=graph_id
         )
+
+
+def _normalize_repo_row(row: dict[str, Any]) -> dict[str, Any]:
+    """Convert Neo4j temporal types to JSON-safe strings."""
+    out = dict(row)
+    ts = out.get("ingested_at")
+    if ts is not None and not isinstance(ts, str):
+        # Neo4j returns datetime objects — convert to ISO string for pydantic
+        to_native = getattr(ts, "to_native", None)
+        if callable(to_native):
+            out["ingested_at"] = to_native().isoformat()
+        elif hasattr(ts, "isoformat"):
+            out["ingested_at"] = ts.isoformat()
+        else:
+            out["ingested_at"] = str(ts)
+    return out
