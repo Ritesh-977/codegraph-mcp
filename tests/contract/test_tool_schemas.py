@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 import json
 from pathlib import Path
 
@@ -24,7 +25,7 @@ def _registered_tools() -> list[dict[str, str]]:
             tools.append(
                 {
                     "name": name,
-                    "description": (tool.description or "").strip(),
+                    "description": inspect.cleandoc(tool.description or ""),
                 }
             )
     return sorted(tools, key=lambda t: t["name"])
