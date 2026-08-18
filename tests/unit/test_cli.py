@@ -51,6 +51,16 @@ def test_cli_reset_requires_graph_id(capsys: object) -> None:  # type: ignore[no
     assert exc.value.code == 2
 
 
+def test_cli_reset_without_neo4j_returns_1(monkeypatch: object) -> None:  # type: ignore[no-untyped-def]
+    # reset is now wired — with a guaranteed-bad Neo4j URI it fails fast at
+    # connect() and returns 1. Proves the code path is live (past the old stub
+    # that returned 2) without making any real network calls (offline-safe).
+    monkeypatch.setenv("NEO4J_URI", "bolt://localhost:1")  # type: ignore[attr-defined]
+    monkeypatch.setenv("NEO4J_PASSWORD", "wrong")  # type: ignore[attr-defined]
+    rc = main(["reset", "--graph-id", "test/repo"])
+    assert rc == 1
+
+
 def test_cli_ls_without_neo4j_returns_1(monkeypatch: object) -> None:  # type: ignore[no-untyped-def]
     monkeypatch.setenv("NEO4J_URI", "bolt://localhost:1")  # type: ignore[attr-defined]
     monkeypatch.setenv("NEO4J_PASSWORD", "wrong")  # type: ignore[attr-defined]

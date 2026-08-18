@@ -63,8 +63,27 @@ def _cmd_ls() -> int:
 
 
 def _cmd_reset(args: argparse.Namespace) -> int:
-    print("reset not yet implemented (Day 6)", file=sys.stderr)
-    return 2
+    import asyncio
+
+    from codegraph.config import Settings
+    from codegraph.repo.neo4j_adapter import Neo4jAdapter
+
+    async def _go() -> int:
+        s = Settings()
+        ad = Neo4jAdapter.from_settings(s)
+        try:
+            await ad.connect()
+            await ad.soft_cleanup(args.graph_id)
+            print(f"wiped graph_id={args.graph_id}", file=sys.stderr)
+        except Exception as ex:
+            print(f"reset failed: {ex}", file=sys.stderr)
+            return 1
+        finally:
+            with contextlib.suppress(Exception):
+                await ad.close()
+        return 0
+
+    return asyncio.run(_go())
 
 
 def _cmd_ingest(args: argparse.Namespace) -> int:
