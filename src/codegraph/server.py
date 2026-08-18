@@ -192,7 +192,9 @@ async def find_file_dependencies(
         )
     except Exception as ex:
         raise ToolError(
-            f"Failed to find dependencies for '{file_path}' in '{graph_id}': {ex}"
+            f"Failed to find dependencies for '{file_path}' in '{graph_id}': {ex}. "
+            f"Verify Neo4j is running and the graph_id is ingested via list_repos. "
+            f"Use get_repo_structure to confirm the file path exists."
         ) from ex
     lines = [f"Dependencies for '{file_path}' in '{graph_id}':"]
     if result.imported_by:
@@ -244,7 +246,10 @@ async def search_nodes(
             state.adapter, SearchNodesArgs(graph_id=graph_id, query=query, kind=kind, limit=limit)
         )
     except Exception as ex:
-        raise ToolError(f"Search failed for '{query}' in '{graph_id}': {ex}") from ex
+        raise ToolError(
+            f"Search failed for '{query}' in '{graph_id}': {ex}. "
+            f"Verify Neo4j is running and the graph_id is ingested via list_repos."
+        ) from ex
     lines = [f"Search '{query}' in '{graph_id}' ({kind}): {len(result.hits)} hit(s)"]
     for h in result.hits:
         lines.append(f"  - {h.name}  (kind: {h.kind}, path: {h.path})")
@@ -271,7 +276,10 @@ async def get_node_detail(
     except ValueError as ex:
         raise ToolError(str(ex)) from ex
     except Exception as ex:
-        raise ToolError(f"Failed to get node '{node_id}' in '{graph_id}': {ex}") from ex
+        raise ToolError(
+            f"Failed to get node '{node_id}' in '{graph_id}': {ex}. "
+            f"Verify Neo4j is running. Use search_nodes to find a valid node id first."
+        ) from ex
     summary = f"Node '{result.name}' (kind: {result.kind})"
     if result.path:
         summary += f"  path: {result.path}"

@@ -119,27 +119,36 @@ class Neo4jAdapter:
         ) if direction in ("imports", "both") else []
 
         # callers: functions in OTHER files that CALL a function defined in this file
+        # Traverse via DEFINES edge (language-agnostic) instead of qname prefix matching
         callers = await self._run_read(
             "MATCH (caller:Function {graph_id: $gid})-[:CALLS]->(callee:Function {graph_id: $gid}) "
-            "WHERE callee.qualified_name STARTS WITH $pfx "
+            "<-[:DEFINES]-(calleeFile:File {graph_id: $gid, path: $p}) "
             "RETURN caller.qualified_name AS path, 'function' AS kind, 'called_by' AS via, 1 AS hop",
-            gid=graph_id, pfx=file_path + "::",
+            gid=graph_id, p=file_path,
         ) if direction in ("imported_by", "both") else []
 
         # calls: functions this file's functions CALL
+        # Traverse via DEFINES edge (language-agnostic)
         calls = await self._run_read(
-            "MATCH (caller:Function {graph_id: $gid})-[:CALLS]->(callee:Function {graph_id: $gid}) "
-            "WHERE caller.qualified_name STARTS WITH $pfx "
+            "MATCH (callerFile:File {graph_id: $gid, path: $p})-[:DEFINES]->"
+            "(caller:Function {graph_id: $gid})-[:CALLS]->(callee:Function {graph_id: $gid}) "
             "RETURN callee.qualified_name AS path, 'function' AS kind, 'calls' AS via, 1 AS hop",
-            gid=graph_id, pfx=file_path + "::",
+            gid=graph_id, p=file_path,
         ) if direction in ("imports", "both") else []
 
-        # external symbols (unresolved imports/calls)
-        ext = await self._run_read(
-            "MATCH (f:File {graph_id: $gid, path: $p})-[:IMPORTS|:CALLS]->(s:Symbol {graph_id: $gid}) "
+        # external symbols (unresolved imports from File + unresolved calls from Function)
+        ext_imports = await self._run_read(
+            "MATCH (f:File {graph_id: $gid, path: $p})-[:IMPORTS]->(s:Symbol {graph_id: $gid}) "
             "RETURN s.name AS name, s.kind AS kind",
             gid=graph_id, p=file_path,
         )
+        ext_calls = await self._run_read(
+            "MATCH (f:File {graph_id: $gid, path: $p})-[:DEFINES]->(fn:Function {graph_id: $gid})"
+            "-[:CALLS]->(s:Symbol {graph_id: $gid}) "
+            "RETURN s.name AS name, s.kind AS kind",
+            gid=graph_id, p=file_path,
+        )
+        ext = ext_imports + ext_calls
 
         return {
             "file": {"path": file_path, "graph_id": graph_id},

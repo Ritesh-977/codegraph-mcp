@@ -26,7 +26,17 @@ _LANGS = {
     "tsx": lambda: Language(tsts.language_tsx()),
 }
 
-_QUERY = """
+# JavaScript grammar uses 'identifier' for class names, TS/TSX use 'type_identifier'
+_QUERY_JS = """
+(function_declaration name: (identifier) @fn.name) @fn.def
+(method_definition name: (property_identifier) @meth.name) @meth.def
+(class_declaration name: (identifier) @cls.name) @cls.def
+(import_statement) @imp.stmt
+(call_expression function: (identifier) @call.name)
+(call_expression function: (member_expression property: (property_identifier) @call.name))
+"""
+
+_QUERY_TS = """
 (function_declaration name: (identifier) @fn.name) @fn.def
 (method_definition name: (property_identifier) @meth.name) @meth.def
 (class_declaration name: (type_identifier) @cls.name) @cls.def
@@ -42,7 +52,9 @@ def parse_jsts(path: str, source: bytes, language: str) -> ExtractedFile:
     lang = _LANGS[language]()
     parser = Parser(lang)
     tree = parser.parse(source)
-    q = Query(lang, _QUERY)
+    # tree-sitter Query constructor mutates the query string; pass a copy
+    query_str = _QUERY_JS[:] if language == "js" else _QUERY_TS[:]
+    q = Query(lang, query_str)
     cursor = QueryCursor(q)
     captures = cursor.captures(tree.root_node)
 

@@ -14,7 +14,7 @@ import pathspec
 _EXT_LANG = {
     ".py": "py",
     ".js": "js", ".mjs": "js", ".cjs": "js",
-    ".ts": "ts", ".tsx": "tsx", ".jsx": "js",
+    ".ts": "ts", ".tsx": "tsx", ".jsx": "tsx",
 }
 
 _SKIP_DIRS = {

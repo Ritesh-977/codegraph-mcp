@@ -70,9 +70,9 @@ def build_ingest_plan(
         for fn in ef.functions:
             plan.append((
                 "MERGE (fn:Function {graph_id: $gid, qualified_name: $qn}) "
-                "SET fn.name = $name, fn.kind = $kind, fn.start_line = $sl, fn.end_line = $el",
+                "SET fn.name = $name, fn.kind = $kind, fn.start_line = $sl, fn.end_line = $el, fn.path = $fpath",
                 {"gid": slug, "qn": fn.qualified_name, "name": fn.name,
-                 "kind": fn.kind, "sl": fn.start_line, "el": fn.end_line},
+                 "kind": fn.kind, "sl": fn.start_line, "el": fn.end_line, "fpath": ef.path},
             ))
             plan.append((
                 "MATCH (f:File {graph_id: $gid, path: $path}), "
