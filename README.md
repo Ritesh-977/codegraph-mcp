@@ -1,188 +1,100 @@
-# CodeGraph MCP
+# codegraph-mcp
 
-A Knowledge Graph MCP Server that analyzes GitHub repositories and stores their code structure in **Neo4j**.
+Knowledge-Graph MCP Server for GitHub repos. Ingests any GitHub repo's code into a
+Neo4j graph (Repository / File / Function nodes; CONTAINS / DEFINES / IMPORTS / CALLS
+edges) and exposes that graph as read-only MCP tools to any MCP host — Claude Desktop,
+opencode, Cursor, or any client that speaks the Model Context Protocol.
 
-It helps AI assistants understand relationships in a codebase, such as:
+## Status
 
-* Which files import a particular file?
-* Which functions call another function?
-* What could be affected if a function or file is changed?
-* How are different parts of the repository connected?
+v0.1 — stdio transport, Neo4j 5.x backend, Python `ast` + tree-sitter (JS/TS/TSX) parsing.
 
-Instead of searching through text, it uses a **graph of the codebase** to answer these questions.
-
-## How It Works
-
-CodeGraph has two main parts:
-
-### 1. Ingest
+## Quick start
 
 ```bash
-codegraph ingest <git-url>
+git clone <codegraph-mcp> && cd codegraph-mcp
+uv sync --extra dev              # all deps pinned via uv.lock
+docker compose up -d             # Neo4j on bolt://localhost:7687
+cp .env.example .env
+uv run pytest -m "not slow and not integration"
 ```
 
-The ingestion process:
-
-1. Clones the repository.
-2. Reads the source files.
-3. Parses Python using Python AST and JavaScript/TypeScript using Tree-sitter.
-4. Creates nodes and relationships in Neo4j.
-5. Stores files, functions, symbols, imports, and calls as a graph.
-
-Example:
-
-```text
-Repository
-   └── File
-        ├── Function
-        ├── Function
-        └── Symbol
-
-File ──IMPORTS──> File
-Function ──CALLS──> Function
-File ──DEFINES──> Function
-```
-
-### 2. Serve
+## Ingest a repo
 
 ```bash
-codegraph serve
+uv run codegraph ingest https://github.com/<owner>/<name>
+# → {"graph_id": "owner/name", "files": 142, "functions": 880, ...}
 ```
 
-Runs the MCP server and exposes the graph to MCP-compatible clients such as Claude Desktop, Cursor, and other MCP hosts.
+## Connect an MCP host
 
-The server is **read-only** and only queries the existing Neo4j graph.
+### Claude Desktop (`claude_desktop_config.json`)
 
-## Requirements
-
-* Python 3.11+
-* [uv](https://docs.astral.sh/uv/)
-* Docker
-* Neo4j 5.x
-
-## Quick Start
-
-```bash
-# Install dependencies
-make dev
-
-# Start Neo4j
-make up
-
-# Ingest a repository
-codegraph ingest https://github.com/owner/repo --branch main
-
-# Check ingested repositories
-codegraph ls
-
-# Start the MCP server
-codegraph serve
-```
-
-For development/testing, you can also run:
-
-```bash
-make inspector
-```
-
-to open the MCP Inspector.
-
-## Connect to an MCP Client
-
-Add CodeGraph to your MCP client configuration:
-
-```json
+```jsonc
 {
   "mcpServers": {
     "codegraph": {
       "command": "uv",
-      "args": ["run", "codegraph", "serve"]
+      "args": ["run", "--directory", "C:\\path\\to\\codegraph-mcp", "codegraph", "serve"]
     }
   }
 }
 ```
 
-## Available MCP Tools
+### opencode (in `opencode.json`)
 
-| Tool                     | Description                                           |
-| ------------------------ | ----------------------------------------------------- |
-| `list_repos`             | List all ingested repositories                        |
-| `init_repository_node`   | Check a repository and get basic statistics           |
-| `get_repo_structure`     | Explore files and directories                         |
-| `find_file_dependencies` | Find imports, imported-by files, callers, and callees |
-| `search_nodes`           | Search for files, functions, and symbols              |
-| `get_node_detail`        | Get details about a specific node                     |
+```jsonc
+{
+  "mcp": {
+    "codegraph": {
+      "type": "local",
+      "command": ["uv", "run", "--directory", "/path/to/codegraph-mcp", "codegraph", "serve"]
+    }
+  }
+}
+```
 
-### Resources
+### Cursor (`~/.cursor/mcp.json`)
 
-| Resource                        | Description                             |
-| ------------------------------- | --------------------------------------- |
-| `codegraph://repos`             | List of ingested repositories           |
-| `codegraph://schema/{graph_id}` | Graph schema and repository information |
+```jsonc
+{
+  "mcpServers": {
+    "codegraph": {
+      "command": "uv",
+      "args": ["run", "--directory", "/path/to/codegraph-mcp", "codegraph", "serve"]
+    }
+  }
+}
+```
 
-## CLI Commands
+### MCP Inspector (for testing without an MCP host)
 
 ```bash
-codegraph ingest <url>                # Ingest a repository
-codegraph ingest <url> --branch X     # Ingest a specific branch
-codegraph ingest <url> --force        # Re-clone and ingest
-codegraph ls                          # List ingested repositories
-codegraph serve                       # Start the MCP server
-codegraph reset --graph-id OWNER/NAME # Delete a repository graph
+uv run mcp dev src/codegraph/server.py
 ```
 
-## Configuration
+## CLI
 
-Configuration is loaded from environment variables or `.env`.
+| Command | Purpose |
+|---|---|
+| `codegraph ingest <url> [--branch main] [--force]` | Clone + parse + load a repo into Neo4j |
+| `codegraph serve` | Run the MCP server (stdio) — spawned by the MCP host |
+| `codegraph reset --graph-id <owner/name>` | Hard-wipe one repo from Neo4j (destructive) |
+| `codegraph ls` | List ingested repos |
 
-| Variable            | Default                 | Description            |
-| ------------------- | ----------------------- | ---------------------- |
-| `NEO4J_URI`         | `bolt://localhost:7687` | Neo4j connection       |
-| `NEO4J_USER`        | `neo4j`                 | Neo4j username         |
-| `NEO4J_PASSWORD`    | `changeme123`           | Neo4j password         |
-| `NEO4J_DB`          | `neo4j`                 | Neo4j database         |
-| `REPOS_DIR`         | `./repos`               | Local repository cache |
-| `INGEST_BATCH_SIZE` | `200`                   | Neo4j write batch size |
-| `INGEST_DEPTH`      | `1`                     | Git clone depth        |
-| `LOG_LEVEL`         | `INFO`                  | Logging level          |
+## Tools
 
-## Project Structure
+| Tool | Purpose |
+|---|---|
+| `list_repos` | List ingested repos |
+| `init_repository_node` | Confirm a repo's graph exists; return file/function counts |
+| `get_repo_structure` | Tiered tree view under a path |
+| `find_file_dependencies` | **Flagship:** what files/funcs depend on (or are depended on by) a file |
+| `search_nodes` | Find functions/files by name |
+| `get_node_detail` | Deep detail on one node (line range, kind) |
 
-```text
-src/codegraph/
-├── cli.py          # CLI commands
-├── server.py       # MCP server
-├── config.py       # Configuration
-├── ingestion/      # Repository parsing and graph creation
-├── models/         # Data models
-├── tools/          # MCP tools
-└── repo/           # Neo4j integration
+## Tech stack
 
-tests/              # Tests
-```
+Python 3.11+, `mcp>=1.27,<2` (stable v1.x FastMCP), Neo4j 5.x, pydantic v2, tree-sitter, GitPython, pytest, ruff, mypy, uv.
 
-## Development
-
-```bash
-make dev              # Install dependencies
-make lint             # Run Ruff
-make typecheck        # Run MyPy
-make test             # Run tests
-make test-slow        # Run all tests including integration tests
-make inspector        # Start MCP Inspector
-make snapshot-update  # Update tool-schema snapshots
-```
-
-## Status
-
-**v0.1 — In Development**
-
-Currently supports:
-
-* Neo4j 5.x
-* MCP over stdio
-* Python parsing
-* JavaScript/TypeScript parsing
-* Repository dependency analysis
-
-Cross-repository dependency analysis is planned for a future version.
+See `CONTRIBUTING.md` for architecture, conventions, and testing strategy.
