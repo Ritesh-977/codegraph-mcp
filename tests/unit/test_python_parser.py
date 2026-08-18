@@ -34,10 +34,10 @@ def test_extracts_top_level_function() -> None:
 def test_extracts_class_and_methods() -> None:
     ef = parse_python("svc.py", _SOURCE)
     by_qname = {f.qualified_name: f for f in ef.functions}
-    assert "UserService" in by_qname
-    assert by_qname["UserService"].kind == "class"
-    assert "UserService.get" in by_qname
-    assert by_qname["UserService.get"].kind == "method"
+    assert "svc.py::UserService" in by_qname
+    assert by_qname["svc.py::UserService"].kind == "class"
+    assert "svc.py::UserService.get" in by_qname
+    assert by_qname["svc.py::UserService.get"].kind == "method"
 
 
 def test_extracts_imports() -> None:
@@ -49,8 +49,8 @@ def test_extracts_imports() -> None:
 def test_extracts_calls_with_caller_qname() -> None:
     ef = parse_python("svc.py", _SOURCE)
     callers = {c.caller_qname for c in ef.calls}
-    assert "UserService.get" in callers
-    assert "main" in callers
+    assert "svc.py::UserService.get" in callers
+    assert "svc.py::main" in callers
 
 
 def test_resolved_path_is_none_when_no_known_files() -> None:
@@ -80,3 +80,15 @@ def test_syntax_error_returns_empty_extracted_file() -> None:
     assert ef.functions == []
     assert ef.imports == []
     assert ef.calls == []
+
+
+def test_file_scoped_qnames_prevent_cross_file_collisions() -> None:
+    """Two files each defining `def helper()` must produce distinct qnames."""
+    src = b"def helper():\n    pass\n"
+    ef_a = parse_python("pkg/a.py", src)
+    ef_b = parse_python("pkg/b.py", src)
+    qn_a = ef_a.functions[0].qualified_name
+    qn_b = ef_b.functions[0].qualified_name
+    assert qn_a != qn_b
+    assert qn_a == "pkg/a.py::helper"
+    assert qn_b == "pkg/b.py::helper"

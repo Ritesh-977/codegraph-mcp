@@ -24,11 +24,14 @@ def parse_python(path: str, source: bytes) -> ExtractedFile:
     calls: list[ExtractedCall] = []
 
     class _Visitor(ast.NodeVisitor):
-        def __init__(self) -> None:
+        def __init__(self, file_path: str) -> None:
             self._stack: list[str] = []
+            self._file_path = file_path
 
         def _qname(self, name: str) -> str:
-            return ".".join([*self._stack, name]) if self._stack else name
+            """Build a file-scoped qualified name: `path::Class.method` or `path::func`."""
+            dotted = ".".join([*self._stack, name]) if self._stack else name
+            return f"{self._file_path}::{dotted}"
 
         def visit_ClassDef(self, node: ast.ClassDef) -> None:
             q = self._qname(node.name)
@@ -69,13 +72,14 @@ def parse_python(path: str, source: bytes) -> ExtractedFile:
                 imports.append(ExtractedImport(module=mod, symbol=alias.name, resolved_path=None))
 
         def visit_Call(self, node: ast.Call) -> None:
-            caller = ".".join(self._stack) if self._stack else "<module>"
+            dotted = ".".join(self._stack) if self._stack else "<module>"
+            caller = f"{self._file_path}::{dotted}"
             callee = _callee_name(node)
             if callee:
                 calls.append(ExtractedCall(caller_qname=caller, callee_name=callee))
             self.generic_visit(node)
 
-    _Visitor().visit(tree)
+    _Visitor(path).visit(tree)
     return ExtractedFile(path=path, language="py", functions=functions, imports=imports, calls=calls)
 
 
