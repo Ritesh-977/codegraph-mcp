@@ -123,6 +123,7 @@ class Neo4jAdapter:
         callers = await self._run_read(
             "MATCH (caller:Function {graph_id: $gid})-[:CALLS]->(callee:Function {graph_id: $gid}) "
             "<-[:DEFINES]-(calleeFile:File {graph_id: $gid, path: $p}) "
+            "WHERE calleeFile.deleted = false "
             "RETURN caller.qualified_name AS path, 'function' AS kind, 'called_by' AS via, 1 AS hop",
             gid=graph_id, p=file_path,
         ) if direction in ("imported_by", "both") else []
@@ -132,6 +133,7 @@ class Neo4jAdapter:
         calls = await self._run_read(
             "MATCH (callerFile:File {graph_id: $gid, path: $p})-[:DEFINES]->"
             "(caller:Function {graph_id: $gid})-[:CALLS]->(callee:Function {graph_id: $gid}) "
+            "WHERE callerFile.deleted = false "
             "RETURN callee.qualified_name AS path, 'function' AS kind, 'calls' AS via, 1 AS hop",
             gid=graph_id, p=file_path,
         ) if direction in ("imports", "both") else []
@@ -139,12 +141,14 @@ class Neo4jAdapter:
         # external symbols (unresolved imports from File + unresolved calls from Function)
         ext_imports = await self._run_read(
             "MATCH (f:File {graph_id: $gid, path: $p})-[:IMPORTS]->(s:Symbol {graph_id: $gid}) "
+            "WHERE f.deleted = false "
             "RETURN s.name AS name, s.kind AS kind",
             gid=graph_id, p=file_path,
         )
         ext_calls = await self._run_read(
             "MATCH (f:File {graph_id: $gid, path: $p})-[:DEFINES]->(fn:Function {graph_id: $gid})"
             "-[:CALLS]->(s:Symbol {graph_id: $gid}) "
+            "WHERE f.deleted = false "
             "RETURN s.name AS name, s.kind AS kind",
             gid=graph_id, p=file_path,
         )
@@ -168,13 +172,15 @@ class Neo4jAdapter:
         if kind == "function":
             cypher = (
                 "MATCH (fn:Function {graph_id: $gid}) WHERE toLower(fn.name) CONTAINS $q "
-                "RETURN fn.qualified_name AS qualified_name, fn.name AS name, fn.kind AS kind, '' AS path, 1.0 AS score "
+                "RETURN elementId(fn) AS id, fn.qualified_name AS qualified_name, "
+                "fn.name AS name, fn.kind AS kind, '' AS path, 1.0 AS score "
                 "LIMIT $lim"
             )
         elif kind == "file":
             cypher = (
                 "MATCH (f:File {graph_id: $gid}) WHERE f.deleted = false AND toLower(f.path) CONTAINS $q "
-                "RETURN '' AS qualified_name, f.path AS name, 'file' AS kind, f.path AS path, 1.0 AS score "
+                "RETURN elementId(f) AS id, '' AS qualified_name, "
+                "f.path AS name, 'file' AS kind, f.path AS path, 1.0 AS score "
                 "LIMIT $lim"
             )
         else:
@@ -182,7 +188,8 @@ class Neo4jAdapter:
                 "MATCH (n {graph_id: $gid}) WHERE "
                 "(n:Function AND toLower(n.name) CONTAINS $q) "
                 "OR (n:File AND n.deleted = false AND toLower(n.path) CONTAINS $q) "
-                "RETURN coalesce(n.qualified_name, '') AS qualified_name, "
+                "RETURN elementId(n) AS id, "
+                "coalesce(n.qualified_name, '') AS qualified_name, "
                 "coalesce(n.name, n.path) AS name, "
                 "CASE WHEN n:Function THEN 'function' WHEN n:File THEN 'file' ELSE 'other' END AS kind, "
                 "coalesce(n.path, '') AS path, 1.0 AS score LIMIT $lim"

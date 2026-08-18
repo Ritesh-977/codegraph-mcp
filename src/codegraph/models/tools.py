@@ -87,6 +87,7 @@ class SearchNodesArgs(BaseModel):
 
 
 class SearchHit(BaseModel):
+    id: str | None = None
     name: str
     qualified_name: str | None = None
     path: str | None = None
