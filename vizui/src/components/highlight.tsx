@@ -18,11 +18,11 @@ export function highlightLine(line: string): ReactNode[] {
     if (m.index > last) parts.push(line.slice(last, m.index))
     const tok = m[0]
     if (tok.startsWith('//') || tok.startsWith('#')) {
-      parts.push(<span key={k++} style={{ color: '#6a9955' }}>{tok}</span>)
+      parts.push(<span key={k++} className="tok-comment">{tok}</span>)
     } else if (tok.startsWith("'") || tok.startsWith('"') || tok.startsWith('`')) {
-      parts.push(<span key={k++} style={{ color: '#ce9178' }}>{tok}</span>)
+      parts.push(<span key={k++} className="tok-string">{tok}</span>)
     } else if (KEYWORDS.has(tok)) {
-      parts.push(<span key={k++} style={{ color: '#569cd6' }}>{tok}</span>)
+      parts.push(<span key={k++} className="tok-keyword">{tok}</span>)
     } else {
       parts.push(tok)
     }

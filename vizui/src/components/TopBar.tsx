@@ -1,57 +1,76 @@
+import type { LayoutName } from './GraphCanvas'
 import type { RepoInfo } from '../types'
 
 export interface TopBarProps {
   repos: RepoInfo[]
   graphId: string | null
   view: 'overview' | 'full'
-  layout: 'fcose' | 'concentric' | 'breadthfirst'
+  layout: LayoutName
   onRepo: (id: string) => void
   onView: (view: 'overview' | 'full') => void
-  onLayout: (l: 'fcose' | 'concentric' | 'breadthfirst') => void
+  onLayout: (l: LayoutName) => void
   onSearch: (q: string) => void
 }
 
-const LAYOUTS: TopBarProps['layout'][] = ['fcose', 'concentric', 'breadthfirst']
-const CONTROL: React.CSSProperties = {
-  background: '#1a2029',
-  color: '#e8e8e8',
-  border: '1px solid #39424f',
-  borderRadius: 4,
-  padding: 4,
-}
+const LAYOUTS: { value: LayoutName; label: string }[] = [
+  { value: 'architecture', label: 'Architecture (layered)' },
+  { value: 'fcose', label: 'Force-directed' },
+  { value: 'concentric', label: 'Concentric' },
+  { value: 'breadthfirst', label: 'Breadth-first' },
+]
 
 export function TopBar(props: TopBarProps) {
   return (
-    <div style={{ display: 'flex', gap: 12, alignItems: 'center', padding: '8px 14px', borderBottom: '1px solid #2b3441' }}>
-      <strong>codegraph-viz</strong>
-      <select value={props.graphId ?? ''} onChange={(e) => props.onRepo(e.target.value)} style={CONTROL}>
+    <header className="topbar">
+      <span className="topbar__brand">codegraph</span>
+
+      <select
+        className="control"
+        value={props.graphId ?? ''}
+        onChange={(e) => props.onRepo(e.target.value)}
+        aria-label="Repository"
+      >
         <option value="" disabled>Select repository…</option>
         {props.repos.map((r) => (
           <option key={r.graph_id} value={r.graph_id}>{r.graph_id}</option>
         ))}
       </select>
-      <label style={{ fontSize: 12 }}>
-        View{' '}
-        <select value={props.view} onChange={(e) => props.onView(e.target.value as 'overview' | 'full')} style={CONTROL}>
-          <option value="overview">Overview (clusters)</option>
-          <option value="full">Full</option>
+
+      <label className="field">
+        Scope
+        <select
+          className="control"
+          value={props.view}
+          onChange={(e) => props.onView(e.target.value as 'overview' | 'full')}
+        >
+          <option value="overview">Directories</option>
+          <option value="full">All files</option>
         </select>
       </label>
-      <label style={{ fontSize: 12 }}>
-        Layout{' '}
-        <select value={props.layout} onChange={(e) => props.onLayout(e.target.value as TopBarProps['layout'])} style={CONTROL}>
+
+      <label className="field">
+        Layout
+        <select
+          className="control"
+          value={props.layout}
+          onChange={(e) => props.onLayout(e.target.value as LayoutName)}
+        >
           {LAYOUTS.map((l) => (
-            <option key={l} value={l}>{l}</option>
+            <option key={l.value} value={l.value}>{l.label}</option>
           ))}
         </select>
       </label>
+
+      <span className="topbar__spacer" />
+
       <input
-        placeholder="Search files / functions…"
-        style={{ ...CONTROL, flex: 1, maxWidth: 360 }}
+        className="control control--search"
+        placeholder="Search files…  ⏎ to focus"
+        aria-label="Search files"
         onKeyDown={(e) => {
           if (e.key === 'Enter' && props.graphId) props.onSearch((e.target as HTMLInputElement).value)
         }}
       />
-    </div>
+    </header>
   )
 }

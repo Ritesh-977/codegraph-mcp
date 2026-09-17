@@ -5,57 +5,100 @@ export interface DetailPanelProps {
   detail: FileDetail | null
   loading: boolean
   onClose: () => void
+  onFocusPath: (path: string) => void
+  onImpact: () => void
 }
 
-export function DetailPanel({ detail, loading, onClose }: DetailPanelProps) {
+export function DetailPanel({ detail, loading, onClose, onFocusPath, onImpact }: DetailPanelProps) {
   if (!detail && !loading) return null
   return (
-    <aside style={{ width: 380, borderLeft: '1px solid #2b3441', overflow: 'auto', background: '#12161c', padding: 12 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <strong style={{ fontSize: 13 }}>{detail?.path ?? 'Loading…'}</strong>
-        <button onClick={onClose} style={{ background: 'none', border: 'none', color: '#9aa4b1', cursor: 'pointer' }}>✕</button>
+    <aside className="panel panel--right">
+      <div className="panel__head">
+        <div style={{ minWidth: 0 }}>
+          <div className="panel__title">File</div>
+          <div className="panel__path">{detail?.path ?? 'Loading…'}</div>
+        </div>
+        <button className="btn btn--ghost" onClick={onClose} aria-label="Close">✕</button>
       </div>
+
       {detail && (
         <>
-          <p style={{ fontSize: 12, color: '#9aa4b1', margin: '6px 0' }}>
-            {detail.language} · {detail.last_author ? `last: ${detail.last_author}` : 'no git history'}
-          </p>
-          <section style={{ fontSize: 12, marginBottom: 10 }}>
-            <strong>Imports</strong>
-            <ul style={{ margin: 0, paddingLeft: 16 }}>
-              {detail.imports.map((p) => <li key={p}>{p}</li>)}
-              {detail.external_symbols.map((s) => <li key={`x:${s}`}>{s} (external)</li>)}
-            </ul>
-          </section>
-          <section style={{ fontSize: 12, marginBottom: 10 }}>
-            <strong>Dependents</strong>
-            <ul style={{ margin: 0, paddingLeft: 16 }}>
-              {detail.imported_by.map((p) => <li key={p}>{p}</li>)}
-            </ul>
-          </section>
-          <section style={{ fontSize: 12, marginBottom: 10 }}>
-            <strong>Functions</strong>
-            <ul style={{ margin: 0, paddingLeft: 16 }}>
-              {detail.functions.map((f) => (
-                <li key={`${f.qualified_name}:${f.start_line}`}>
-                  {f.name} — {f.start_line}–{f.end_line}
-                </li>
+          <div className="panel__section">
+            <div className="meta">
+              <span><span className="meta__k">lang</span> <span className="meta__v">{detail.language ?? '—'}</span></span>
+              <span><span className="meta__k">lines</span> <span className="meta__v">{detail.end_line}</span></span>
+              <span><span className="meta__k">last</span> <span className="meta__v">{detail.last_author ?? 'no history'}</span></span>
+            </div>
+            <div style={{ marginTop: 12 }}>
+              <button className="btn" onClick={onImpact}>What breaks if I change this?</button>
+            </div>
+          </div>
+
+          <div className="panel__section">
+            <div className="section__head" style={{ cursor: 'default' }}>
+              <span>Imported by</span>
+              <span className="section__count">{detail.imported_by.length}</span>
+            </div>
+            <div className="rows section__body">
+              {detail.imported_by.map((p) => (
+                <button key={p} className="row" onClick={() => onFocusPath(p)} title={p}>
+                  <span className="row__path">{p}</span>
+                </button>
               ))}
-            </ul>
-          </section>
-          <section>
-            <strong>Source{detail.truncated ? ' (truncated)' : ''}</strong>
-            <pre style={{ fontSize: 11, background: '#0e1116', padding: 8, borderRadius: 4, overflow: 'auto', maxHeight: 420 }}>
+              {!detail.imported_by.length && <p className="empty">Nothing imports this file.</p>}
+            </div>
+          </div>
+
+          <div className="panel__section">
+            <div className="section__head" style={{ cursor: 'default' }}>
+              <span>Imports</span>
+              <span className="section__count">{detail.imports.length + detail.external_symbols.length}</span>
+            </div>
+            <div className="rows section__body">
+              {detail.imports.map((p) => (
+                <button key={p} className="row" onClick={() => onFocusPath(p)} title={p}>
+                  <span className="row__path">{p}</span>
+                </button>
+              ))}
+              {detail.external_symbols.map((s) => (
+                <div key={`x:${s}`} className="row" style={{ cursor: 'default' }}>
+                  <span className="row__path">{s}</span>
+                  <span className="badge badge--import">external</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="panel__section">
+            <div className="section__head" style={{ cursor: 'default' }}>
+              <span>Defines</span>
+              <span className="section__count">{detail.functions.length}</span>
+            </div>
+            <div className="rows section__body">
+              {detail.functions.map((f) => (
+                <div key={`${f.qualified_name}:${f.start_line}`} className="row" style={{ cursor: 'default' }}>
+                  <span className="row__path">{f.name}</span>
+                  <span className="row__metric">{f.start_line}–{f.end_line}</span>
+                </div>
+              ))}
+              {!detail.functions.length && <p className="empty">No functions parsed.</p>}
+            </div>
+          </div>
+
+          <div className="panel__section">
+            <div className="section__head" style={{ cursor: 'default' }}>
+              <span>Source</span>
+              {detail.truncated && <span className="badge badge--hidden">truncated</span>}
+            </div>
+            <pre className="source section__body">
               {detail.content.split('\n').map((line, i) => (
-                <div key={detail.start_line + i}>
-                  <span style={{ color: '#4a545f', display: 'inline-block', width: 34, userSelect: 'none' }}>
-                    {detail.start_line + i}
-                  </span>
-                  {highlightLine(line)}
+                <div className="source__line" key={detail.start_line + i}>
+                  <span className="source__no">{detail.start_line + i}</span>
+                  <span>{highlightLine(line)}</span>
                 </div>
               ))}
             </pre>
-          </section>
+          </div>
         </>
       )}
     </aside>

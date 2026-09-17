@@ -147,11 +147,28 @@ make viz                # → http://127.0.0.1:8787
 Without `make viz-build` the API still serves, and `/` returns a hint telling
 you to build the frontend.
 
-**What you get:** an overview of directory clusters (click one to expand a
-level), zoom-gated labels, click-to-highlight of a file's neighborhood
-(outgoing blue, incoming red), particle flow along a hovered file's edges, a
-minimap, a detail panel with source and per-file imports/dependents/functions,
-and an Impact button for the transitive blast radius of a change.
+**What you get.** The default view is an *architecture* layout, not a
+force-directed blob: every node's row is its dependency depth (entry points on
+top, leaves at the bottom) and every node's size is how many files depend on
+it. Position and size carry meaning, so the picture is readable rather than
+decorative.
+
+Alongside it, a Findings panel answers the questions you actually ask of an
+unfamiliar codebase, each one clickable to highlight it on the canvas:
+
+| Finding | Question it answers |
+|---|---|
+| **Hubs** | What is the spine of this system, and what is riskiest to change? |
+| **Entry points** | Where do I start reading? |
+| **Orphans** | What is dead, or reached some way the imports do not show? |
+| **Cycles** | Where is it tangled? (members share a row; the level edge is dashed red) |
+| **Change coupling** | What keeps changing together — especially pairs with *no* import between them, which is coupling the code never admits to |
+
+Plus: search, click-to-highlight a neighbourhood (outgoing blue, incoming
+orange), particle flow along a hovered file's edges, a minimap, a detail panel
+with source and per-file imports/dependents/functions, and blast radius for a
+change. Change coupling reads the on-disk clone's git log; the rest is graph
+structure.
 
 **Development** (hot reload) is two processes:
 

@@ -7,6 +7,12 @@ export interface GraphNode {
   path: string | null
   language: string | null
   file_count: number | null
+  /** Row in the architecture view: longest path from an entry point. Null for
+   *  external symbols, which belong to no layer of this codebase. */
+  layer: number | null
+  fan_in: number | null
+  fan_out: number | null
+  in_cycle: boolean
 }
 
 export interface GraphEdge {
@@ -107,4 +113,48 @@ export interface SearchHit {
   path: string
   qualified_name: string
   score: number
+}
+
+export interface HubEntry {
+  path: string
+  dependents: number
+  dependencies: number
+}
+
+export interface CycleEntry {
+  paths: string[]
+}
+
+export interface CouplingEntry {
+  a: string
+  b: string
+  shared_commits: number
+  strength: number
+  /** False = the two files change together with nothing in the code saying so. */
+  has_import_edge: boolean
+}
+
+export interface Findings {
+  graph_id: string
+  file_count: number
+  edge_count: number
+  max_layer: number
+  hubs: HubEntry[]
+  entry_points: string[]
+  orphans: string[]
+  cycles: CycleEntry[]
+  coupling: CouplingEntry[]
+  coupling_available: boolean
+  coupling_hint: string | null
+}
+
+export type FindingKind = 'hubs' | 'entries' | 'orphans' | 'cycles' | 'coupling'
+
+export interface Highlight {
+  kind: FindingKind
+  /** Cytoscape node ids to flag. */
+  ids: string[]
+  /** Extra non-import edges to draw (used by coupling). */
+  pairs?: [string, string][]
+  critical?: boolean
 }

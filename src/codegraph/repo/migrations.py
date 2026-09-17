@@ -21,4 +21,10 @@ def build_migration_cypher() -> list[str]:
         "CREATE INDEX function_name IF NOT EXISTS FOR (fn:Function) ON (fn.name)",
         "CREATE INDEX symbol_graph_id_name IF NOT EXISTS "
         "FOR (s:Symbol) ON (s.graph_id, s.name)",
+        # Full-text indexes back search_nodes' relevance ranking. Available on
+        # Neo4j Community (unlike vector indexes), verified on 5.26 community.
+        "CREATE FULLTEXT INDEX function_fulltext IF NOT EXISTS "
+        "FOR (fn:Function) ON EACH [fn.name, fn.qualified_name]",
+        "CREATE FULLTEXT INDEX file_fulltext IF NOT EXISTS "
+        "FOR (f:File) ON EACH [f.path]",
     ]

@@ -1,6 +1,7 @@
 import type {
   ExpandResult,
   FileDetail,
+  Findings,
   GraphPayload,
   ImpactPayload,
   ImpactRequest,
@@ -73,4 +74,9 @@ export async function search(graphId: string, q: string): Promise<SearchHit[]> {
 export async function fetchFileDetail(graphId: string, path: string): Promise<FileDetail> {
   const qs = new URLSearchParams({ graph_id: graphId, path })
   return json(await fetch(`/api/file?${qs}`))
+}
+
+export async function fetchFindings(graphId: string): Promise<Findings> {
+  const qs = new URLSearchParams({ graph_id: graphId })
+  return json(await fetch(`/api/findings?${qs}`))
 }

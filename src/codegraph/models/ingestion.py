@@ -25,6 +25,12 @@ class ExtractedImport:
 class ExtractedCall:
     caller_qname: str      # qualified name of the enclosing function (or "<module>")
     callee_name: str       # raw callee name as written
+    # Receiver of an attribute call — "self" for `self.m()`, the variable name
+    # for `user.save()`, None for a bare `helper()`. Used only to disambiguate
+    # during resolution; never stored in the graph.
+    receiver: str | None = None
+    # Class enclosing the call site, so `self.m()` can bind to the right class.
+    caller_class: str | None = None
 
 
 @dataclass
