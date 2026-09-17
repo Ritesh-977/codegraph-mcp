@@ -6,6 +6,8 @@
 
 **Architecture:** A new `src/codegraph/viz/` backend package (FastAPI + a `VizService` query layer over the existing `Neo4jAdapter`) exposes REST endpoints. A new Vite+React+Cytoscape.js frontend at `vizui/` renders the graph; FastAPI serves the production build and the Vite dev server proxies `/api` during development. The MCP stdio server is untouched; `codegraph viz` is a separate process.
 
+**Status:** Implemented on branch `feat/codegraph-viz` (13 tasks, 13 commits). Deviations found during execution are recorded in "Execution notes" at the end.
+
 **Tech Stack:** Python 3.11, FastAPI, uvicorn, pydantic v2; CSS-free dark React 18 + TypeScript + Vite 5 + Cytoscape.js + cytoscape-fcose; Vitest for pure frontend mapping tests.
 
 ## Global Constraints
@@ -35,7 +37,7 @@
 - Consumes: nothing.
 - Produces: `Settings.viz_host: str` (default `"127.0.0.1"`), `Settings.viz_port: int` (default `8787`); runtime deps `fastapi`, `uvicorn` available to import.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `tests/unit/test_viz_settings.py`:
 
@@ -61,12 +63,12 @@ def test_viz_overridable_via_env(monkeypatch) -> None:
     assert s.viz_port == 9090
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `uv run pytest tests/unit/test_viz_settings.py -v`
 Expected: FAIL — `Settings` has no attribute `viz_host` / default mismatch.
 
-- [ ] **Step 3: Add dependencies**
+- [x] **Step 3: Add dependencies**
 
 In `pyproject.toml` `[project] dependencies`, append (keep alphabetical-ish/grouped):
 
@@ -77,7 +79,7 @@ In `pyproject.toml` `[project] dependencies`, append (keep alphabetical-ish/grou
 
 Run `uv sync --extra dev` to install them.
 
-- [ ] **Step 4: Add Settings fields**
+- [x] **Step 4: Add Settings fields**
 
 Append to the end of `src/codegraph/config.py` (after `log_level`):
 
@@ -87,7 +89,7 @@ Append to the end of `src/codegraph/config.py` (after `log_level`):
     viz_port: int = 8787
 ```
 
-- [ ] **Step 5: Update .env.example**
+- [x] **Step 5: Update .env.example**
 
 Append:
 
@@ -97,12 +99,12 @@ VIZ_HOST=127.0.0.1
 VIZ_PORT=8787
 ```
 
-- [ ] **Step 6: Run test to verify it passes**
+- [x] **Step 6: Run test to verify it passes**
 
 Run: `uv run pytest tests/unit/test_viz_settings.py -v`
 Expected: PASS (2 passed).
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add pyproject.toml uv.lock src/codegraph/config.py .env.example tests/unit/test_viz_settings.py
@@ -122,7 +124,7 @@ git commit -m "feat(viz): add fastapi/uvicorn deps + VIZ_HOST/VIZ_PORT settings"
 - Consumes: `MAX_TRAVERSAL_HOPS` from `src/codegraph/models/common.py`.
 - Produces: `GraphNode`, `GraphEdge`, `GraphStats`, `GraphPayload`, `SubgraphRequest`, `ImpactRequest`, `ImpactRing`, `ImpactPayload`, `ExpandResult`, `FunctionInfo`, `FileDetailResponse` — exact shapes below.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `tests/unit/test_viz_models.py`:
 
@@ -176,12 +178,12 @@ def test_graph_payload_roundtrip() -> None:
     assert payload.edges[0].type == "IMPORTS"
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `uv run pytest tests/unit/test_viz_models.py -v`
 Expected: FAIL — `ModuleNotFoundError: codegraph.viz.models`.
 
-- [ ] **Step 3: Create the viz package and models**
+- [x] **Step 3: Create the viz package and models**
 
 Create `src/codegraph/viz/__init__.py`:
 
@@ -300,12 +302,12 @@ class FileDetailResponse(BaseModel):
     external_symbols: list[str] = []
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `uv run pytest tests/unit/test_viz_models.py -v`
 Expected: PASS (4 passed).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/codegraph/viz tests/unit/test_viz_models.py
@@ -325,7 +327,7 @@ git commit -m "feat(viz): wire-format pydantic models"
 - Produces: `cluster_key(path: str, depth: int) -> str | None` and
   `build_cluster_graph(nodes, edges, depth) -> tuple[list[GraphNode], list[GraphEdge]]`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `tests/unit/test_viz_clustering.py`:
 
@@ -383,12 +385,12 @@ def test_build_cluster_graph_groups_and_aggregates() -> None:
     assert [n.id for n in cn] == sorted(n.id for n in cn)
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `uv run pytest tests/unit/test_viz_clustering.py -v`
 Expected: FAIL — `ModuleNotFoundError: codegraph.viz.clustering`.
 
-- [ ] **Step 3: Implement clustering.py**
+- [x] **Step 3: Implement clustering.py**
 
 Create `src/codegraph/viz/clustering.py`:
 
@@ -441,7 +443,7 @@ def build_cluster_graph(
         key = cluster_key(path_by_id[nid], depth)
         return f"dir:{key}" if key is not None else nid
 
-    out_nodes = shallow[:]
+    out_nodes: list[GraphNode] = shallow[:]
     out_nodes.extend(
         GraphNode(
             id=f"dir:{key}",
@@ -452,6 +454,7 @@ def build_cluster_graph(
         )
         for key, count in sorted(clusters.items())
     )
+    out_nodes.sort(key=lambda n: n.id)  # test asserts id-sorted output
 
     agg: dict[tuple[str, str], int] = defaultdict(int)
     for e in edges:
@@ -466,12 +469,12 @@ def build_cluster_graph(
     return out_nodes, out_edges
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `uv run pytest tests/unit/test_viz_clustering.py -v`
 Expected: PASS (2 passed).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/codegraph/viz/clustering.py tests/unit/test_viz_clustering.py
@@ -500,7 +503,7 @@ git commit -m "feat(viz): pure directory clustering for overview view"
 
 Node-id conventions (must match frontend): file = `file:{path}`, symbol = `sym:{name}`, dir = `dir:{prefix}`. Node label for files = last path segment.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `tests/unit/test_viz_service.py`. A fake reader stands in for Neo4j:
 
@@ -640,12 +643,12 @@ def _TMP():
 
 Note: `out.external_symbols()` does not exist — the fake's symbols appear as `sym:` nodes; assert `any(n.kind == "symbol" for n in out.nodes)` instead (see Step 3 test fix below).
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `uv run pytest tests/unit/test_viz_service.py -v`
 Expected: FAIL — `ModuleNotFoundError: codegraph.viz.service`.
 
-- [ ] **Step 3: Implement service.py**
+- [x] **Step 3: Implement service.py**
 
 Create `src/codegraph/viz/service.py`:
 
@@ -702,7 +705,14 @@ class VizService:
     async def repos(self) -> list[dict[str, Any]]:
         return await self._adapter.list_repos()
 
-    async def full_graph(self, graph_id: str, max_edges: int = 10_000) -> GraphPayload:
+    async def _load_full(
+        self, graph_id: str
+    ) -> tuple[list[GraphNode], list[GraphEdge], int]:
+        """Every non-deleted File/Symbol node and every IMPORTS edge, uncapped.
+
+        Split out of ``full_graph`` so ``overview_graph`` clusters the whole
+        graph while ``full_graph`` caps what it ships to the browser.
+        """
         files = await self._adapter._run_read(
             "MATCH (f:File {graph_id: $gid}) WHERE f.deleted = false "
             "RETURN elementId(f) AS id, f.path AS path, f.language AS language "
@@ -747,31 +757,44 @@ class VizService:
             for r in fs
             if r["name"] in sym_ids
         )
+        return nodes, edges, len(files)
+
+    async def full_graph(self, graph_id: str, max_edges: int = 10_000) -> GraphPayload:
+        nodes, edges, file_count = await self._load_full(graph_id)
+        truncated = len(edges) > max_edges
+        if truncated:
+            # Actually cap the payload, don't just flag it: 5k-file repos can
+            # carry ~20k edges and the browser has to lay every one of them
+            # out. File nodes stay (they are the repo inventory); symbol nodes
+            # whose only edge was cut would be orphans, so they go.
+            edges = edges[:max_edges]
+            keep = {e.source for e in edges} | {e.target for e in edges}
+            nodes = [n for n in nodes if n.kind == "file" or n.id in keep]
         return GraphPayload(
             graph_id=graph_id,
             view="full",
             nodes=nodes,
             edges=edges,
             stats=GraphStats(
-                file_count=len(files),
+                file_count=file_count,
                 edge_count=len(edges),
-                truncated=len(edges) > max_edges,
+                truncated=truncated,
                 view="full",
             ),
         )
 
     async def overview_graph(self, graph_id: str, depth: int = 1) -> GraphPayload:
-        full = await self.full_graph(graph_id)
-        nodes, edges = build_cluster_graph(full.nodes, full.edges, depth)
+        nodes_all, edges_all, file_count = await self._load_full(graph_id)
+        nodes, edges = build_cluster_graph(nodes_all, edges_all, depth)
         return GraphPayload(
             graph_id=graph_id,
             view="overview",
             nodes=nodes,
             edges=edges,
             stats=GraphStats(
-                file_count=full.stats.file_count,
+                file_count=file_count,
                 edge_count=len(edges),
-                truncated=full.stats.truncated,
+                truncated=False,
                 view="overview",
             ),
         )
@@ -858,7 +881,6 @@ class VizService:
         rings = [ImpactRing(hop=h, paths=sorted(by_hop[h])) for h in sorted(by_hop)]
         callers = sorted({e["path"] for e in res["callers"]})
         calls = sorted({e["path"] for e in res["calls"]})
-        externals = sorted({e["name"] for e in res["external_symbols"]})
         return ImpactPayload(
             graph_id=req.graph_id,
             seed_path=req.seed_path,
@@ -869,36 +891,25 @@ class VizService:
         )
 
     async def expand_dir(self, graph_id: str, dir_prefix: str) -> ExpandResult:
-        prefix = dir_prefix.rstrip("/")
-        rows = await self._adapter._run_read(
-            "MATCH (f:File {graph_id: $gid}) WHERE f.deleted = false "
-            "AND ($prefix = '' OR f.path STARTS WITH $prefix) "
-            "RETURN f.path AS path, f.language AS language "
-            "ORDER BY f.path",
-            gid=graph_id, prefix=prefix if (prefix or "") else "",
-        )
-        if not prefix:
-            files = [r for r in rows]
-        else:
-            files = [r for r in rows if (r["path"] + "/").startswith(prefix + "/")]
-            files = [r for r in files if r["path"] != prefix]
-        nodes = [
-            GraphNode(id=f"file:{r['path']}", kind="file", label=_basename(r["path"]),
-                      path=r["path"], language=r["language"])
-            for r in files
+        """Expand one level: files directly in ``dir_prefix`` + child clusters.
+
+        Returning every descendant would dump thousands of nodes on the canvas
+        the moment a top-level directory of a big repo is clicked, which is the
+        exact thing the overview view exists to avoid. Deeper files re-cluster
+        at the next depth instead.
+        """
+        prefix = dir_prefix.strip("/")
+        nodes_all, edges_all, _ = await self._load_full(graph_id)
+        scope = f"{prefix}/" if prefix else ""
+        inside = [
+            n
+            for n in nodes_all
+            if n.kind == "file" and n.path is not None and n.path.startswith(scope)
         ]
-        ff = await self._adapter._run_read(
-            "MATCH (a:File {graph_id: $gid})-[:IMPORTS]->(b:File {graph_id: $gid}) "
-            "WHERE a.deleted = false AND b.deleted = false "
-            "RETURN a.path AS src, b.path AS dst",
-            gid=graph_id,
-        )
-        keep = {n.id for n in nodes}
-        edges = [
-            GraphEdge(source=f"file:{r['src']}", target=f"file:{r['dst']}", type="IMPORTS")
-            for r in ff
-            if f"file:{r['src']}" in keep and f"file:{r['dst']}" in keep
-        ]
+        keep = {n.id for n in inside}
+        inner = [e for e in edges_all if e.source in keep and e.target in keep]
+        depth = len(prefix.split("/")) + 1 if prefix else 1
+        nodes, edges = build_cluster_graph(inside, inner, depth)
         return ExpandResult(graph_id=graph_id, dir_prefix=prefix, nodes=nodes, edges=edges)
 
     async def search(self, graph_id: str, q: str, kind: str, limit: int = 20) -> list[dict[str, Any]]:
@@ -980,18 +991,18 @@ def test_impact_rings() -> None:
 
 (That is the final test content for `test_impact_rings`; replace the block in the file you wrote in Step 1 with this version.)
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `uv run pytest tests/unit/test_viz_service.py -v`
 Expected: PASS. If `test_subgraph_builds_edges_from_chains` or `test_full_graph` fails, the fake's substring keys are misordered — service queries share fragments (`MATCH (f:File` appears in file, symbol, and language queries), so keys must be the *distinctive RETURN fragments* (as listed in `_fake` above), checked most-specific-first.
 
-- [ ] **Step 5: Lint + typecheck**
+- [x] **Step 5: Lint + typecheck**
 
 Run: `uv run ruff check src tests`
 Run: `uv run mypy src`
 Expected: both clean.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/codegraph/viz/service.py tests/unit/test_viz_service.py
@@ -1010,15 +1021,15 @@ git commit -m "feat(viz): VizService query layer over Neo4jAdapter"
 - Consumes: `create_app(settings, *, adapter=None) -> FastAPI` — builds lifespan, a `VizService`, registers endpoints, serves `vizui/dist/` statics if present, and routes 404/500 to `{"detail","hint"}`.
 - Produces: routes consumed by the frontend:
   - `GET /api/repos`
-  - `GET /api/graph/{graph_id}?view=overview|full&depth=1`
+  - `GET /api/graph?graph_id=&view=overview|full&depth=1`
   - `POST /api/subgraph` (body `SubgraphRequest`)
   - `POST /api/impact` (body `ImpactRequest`)
-  - `GET /api/expand/{graph_id}?dir=prefix`
+  - `GET /api/expand?graph_id=&dir=prefix`
   - `GET /api/search?graph_id=&q=&kind=&limit=`
-  - `GET /api/file/{graph_id}/{file_path:path}`
+  - `GET /api/file?graph_id=&path=`
   - `GET /` and `/assets/...` static frontend (see note)
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `tests/unit/test_viz_api.py`:
 
@@ -1097,7 +1108,7 @@ def test_repos(client) -> None:
 
 
 def test_graph_full(client) -> None:
-    r = client.get("/api/graph/o/n?view=full")
+    r = client.get("/api/graph", params={"graph_id": "o/n", "view": "full"})
     assert r.status_code == 200
     body = r.json()
     assert body["view"] == "full"
@@ -1105,7 +1116,7 @@ def test_graph_full(client) -> None:
 
 
 def test_graph_overview(client) -> None:
-    r = client.get("/api/graph/o/n?view=overview")
+    r = client.get("/api/graph", params={"graph_id": "o/n", "view": "overview"})
     assert r.status_code == 200
     assert r.json()["view"] == "overview"
 
@@ -1132,7 +1143,7 @@ def test_file_detail_endpoint(client, tmp_path) -> None:
     repo_dir = tmp_path / "o__n"
     repo_dir.mkdir(parents=True)
     (repo_dir / "auth.py").write_text("def authenticate():\n    return 'ok'\n", encoding="utf-8")
-    r = client.get("/api/file/o/n/auth.py")
+    r = client.get("/api/file", params={"graph_id": "o/n", "path": "auth.py"})
     assert r.status_code == 200
     body = r.json()
     assert body["path"] == "auth.py"
@@ -1146,7 +1157,7 @@ def test_file_detail_missing_is_404_with_hint(client) -> None:
 
     app = create_app(Settings(repos_dir=tmp_factory(), viz_port=8787), adapter=Boom())
     with TestClient(app) as c:
-        r = c.get("/api/file/o/n/nope.py")
+        r = c.get("/api/file", params={"graph_id": "o/n", "path": "nope.py"})
     assert r.status_code == 404
     assert "hint" in r.json()
 
@@ -1164,12 +1175,12 @@ def tmp_factory():
 
 Note: `test_file_detail_missing_is_404_with_hint` uses a local `tmp_path`-independent helper because it constructs its own app; keep it as written. The `Settings()` constructor in `create_app` calls must include `repos_dir` since `repos_dir` default is `Path("./repos")` (relative path is fine for tests, but tmp_path keeps it hermetic).
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `uv run pytest tests/unit/test_viz_api.py -v`
 Expected: FAIL — `ModuleNotFoundError: codegraph.viz.api`.
 
-- [ ] **Step 3: Implement api.py**
+- [x] **Step 3: Implement api.py**
 
 Create `src/codegraph/viz/api.py`:
 
@@ -1183,15 +1194,16 @@ The MCP stdio server is a separate process and is never touched here.
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, Query
-from fastapi.responses import FileResponse, JSONResponse
 from fastapi.exceptions import RequestValidationError
-from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 
 from codegraph.config import Settings
 from codegraph.repo.neo4j_adapter import Neo4jAdapter
@@ -1203,7 +1215,7 @@ _DIST = Path(__file__).resolve().parents[3] / "vizui" / "dist"
 
 def create_app(settings: Settings, *, adapter: Neo4jAdapter | None = None) -> FastAPI:
     @asynccontextmanager
-    async def lifespan(app: FastAPI) -> Any:  # type: ignore[no-untyped-def]
+    async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         repo = adapter
         if repo is None:
             repo = Neo4jAdapter.from_settings(settings)
@@ -1247,7 +1259,10 @@ def create_app(settings: Settings, *, adapter: Neo4jAdapter | None = None) -> Fa
     async def repos() -> list[dict[str, Any]]:
         return await _svc().repos()
 
-    @app.get("/api/graph/{graph_id}")
+    # graph_id is a repo slug like `github.com/owner/name` — it contains
+    # slashes, and the ASGI server percent-decodes the path before routing, so
+    # `%2F` does not help. Every endpoint takes graph_id as a QUERY parameter.
+    @app.get("/api/graph")
     async def graph(
         graph_id: str,
         view: str = Query("overview", pattern="^(overview|full)$"),
@@ -1265,8 +1280,8 @@ def create_app(settings: Settings, *, adapter: Neo4jAdapter | None = None) -> Fa
     async def impact(req: ImpactRequest) -> Any:
         return await _svc().impact(req)
 
-    @app.get("/api/expand/{graph_id}")
-    async def expand(graph_id: str, dir: str = Query("", pattern="^.*$")) -> Any:
+    @app.get("/api/expand")
+    async def expand(graph_id: str, dir: str = Query("")) -> Any:
         return await _svc().expand_dir(graph_id, dir)
 
     @app.get("/api/search")
@@ -1278,9 +1293,9 @@ def create_app(settings: Settings, *, adapter: Neo4jAdapter | None = None) -> Fa
     ) -> list[dict[str, Any]]:
         return await _svc().search(graph_id, q, kind, limit)
 
-    @app.get("/api/file/{graph_id}/{file_path:path}")
-    async def file_detail(graph_id: str, file_path: str) -> Any:
-        return await _svc().file_detail(graph_id, file_path)
+    @app.get("/api/file")
+    async def file_detail(graph_id: str, path: str) -> Any:
+        return await _svc().file_detail(graph_id, path)
 
     _mount_frontend(app)
     return app
@@ -1305,18 +1320,18 @@ def _mount_frontend(app: FastAPI) -> None:
         return FileResponse(_DIST / "index.html")
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `uv run pytest tests/unit/test_viz_api.py -v`
 Expected: PASS. If validation errors surface as 422 instead of handler output, adjust assertions to `r.status_code == 422` only where intentional (the ValueError handler test expects 404).
 
-- [ ] **Step 5: Lint + typecheck**
+- [x] **Step 5: Lint + typecheck**
 
 Run: `uv run ruff check src tests`
 Run: `uv run mypy src`
 Expected: clean. If mypy complains about `app.state.service` dynamic attr, add `app.state.service = None  # type: ignore` — no, keep `Any` typing on `_svc`; FastAPI's `state` is `Any`-typed already.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/codegraph/viz/api.py tests/unit/test_viz_api.py
@@ -1335,7 +1350,7 @@ git commit -m "feat(viz): FastAPI REST app for the graph viewer"
 - Consumes: `create_app` from Task 5, `Settings`.
 - Produces: `codegraph viz [--host H] [--port P]` — runs uvicorn bound to `args.host or Settings.viz_host` / `args.port or Settings.viz_port`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append to `tests/unit/test_cli.py`:
 
@@ -1350,7 +1365,7 @@ def test_cli_viz_parser_exposes_host_port() -> None:
 
 
 def test_cli_viz_defaults_host_port_to_none() -> None:
-    from codegraph.cli import _build_parser
+    from codegraph.cli import _build_parser, _cmd_viz
 
     args = _build_parser().parse_args(["viz"])
     assert args.host is None
@@ -1358,12 +1373,12 @@ def test_cli_viz_defaults_host_port_to_none() -> None:
     assert callable(_cmd_viz)
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `uv run pytest tests/unit/test_cli.py -v`
 Expected: FAIL — parser rejects `viz` / `_cmd_viz` undefined.
 
-- [ ] **Step 3: Wire the subcommand**
+- [x] **Step 3: Wire the subcommand**
 
 In `_build_parser` (after `sub.add_parser("ls", ...)` at `cli.py:36-37`):
 
@@ -1395,12 +1410,12 @@ In `main()` dispatch (before the final `return 0`):
         return _cmd_viz(args)
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `uv run pytest tests/unit/test_cli.py -v`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/codegraph/cli.py tests/unit/test_cli.py
@@ -1417,7 +1432,7 @@ git commit -m "feat(viz): codegraph viz CLI subcommand"
 **Interfaces:**
 - Consumes: the existing `adapter` and `fresh_graph_id` fixtures from `tests/integration/conftest.py`; `VizService` from Task 4.
 
-- [ ] **Step 1: Write the test**
+- [x] **Step 1: Write the test**
 
 Create `tests/integration/test_viz_endpoints.py`:
 
@@ -1434,14 +1449,23 @@ pytestmark = pytest.mark.integration
 async def _seed(adapter, gid: str) -> None:
     """auth.py imports os (symbol); api.py imports auth.py; src/util.py standalone."""
     await adapter._run_write(
-        "CREATE (r:Repository {graph_id: $gid}) "
-        "-[:CONTAINS]->(auth:File {graph_id: $gid, path: 'auth.py', language: 'python', deleted: false}), "
-        "(r)-[:CONTAINS]->(api:File {graph_id: $gid, path: 'api.py', language: 'python', deleted: false}), "
-        "(r)-[:CONTAINS]->(util:File {graph_id: $gid, path: 'src/util.py', language: 'python', deleted: false}), "
-        "(auth)-[:DEFINES]->(fn:Function {graph_id: $gid, qualified_name: 'auth.authenticate', "
-        "name: 'authenticate', kind: 'function', start_line: 1, end_line: 10}), "
+        "MERGE (r:Repository {graph_id: $gid}) "
+        "MERGE (auth:File {graph_id: $gid, path: 'auth.py'}) "
+        "  SET auth.language = 'python', auth.deleted = false "
+        "MERGE (api:File {graph_id: $gid, path: 'api.py'}) "
+        "  SET api.language = 'python', api.deleted = false "
+        "MERGE (util:File {graph_id: $gid, path: 'src/util.py'}) "
+        "  SET util.language = 'python', util.deleted = false "
+        "MERGE (fn:Function {graph_id: $gid, qualified_name: 'auth.authenticate'}) "
+        "  SET fn.name = 'authenticate', fn.kind = 'function', "
+        "      fn.start_line = 1, fn.end_line = 10 "
+        "MERGE (sym:Symbol {graph_id: $gid, name: 'os'}) SET sym.kind = 'import' "
+        "MERGE (r)-[:CONTAINS]->(auth) "
+        "MERGE (r)-[:CONTAINS]->(api) "
+        "MERGE (r)-[:CONTAINS]->(util) "
+        "MERGE (auth)-[:DEFINES]->(fn) "
         "MERGE (api)-[:IMPORTS]->(auth) "
-        "MERGE (auth)-[:IMPORTS]->(os:Symbol {graph_id: $gid, name: 'os', kind: 'import'})",
+        "MERGE (auth)-[:IMPORTS]->(sym)",
         gid=gid,
     )
 
@@ -1494,12 +1518,12 @@ async def test_viz_subgraph_and_impact(adapter, fresh_graph_id) -> None:
     assert "api.py" in ring_paths
 ```
 
-- [ ] **Step 2: Run the integration test**
+- [x] **Step 2: Run the integration test**
 
 Requires Neo4j: `uv run pytest tests/integration/test_viz_endpoints.py -v` (needs Docker daemon + testcontainers, or `NEO4J_URI` env set).
 Expected: PASS (3 passed).
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add tests/integration/test_viz_endpoints.py
@@ -1517,7 +1541,7 @@ git commit -m "test(viz): integration tests over live Neo4j"
 **Interfaces:**
 - Produces: a Vite dev server on `:5173` proxying `/api` → `http://127.0.0.1:8787`; `npm run build` → `vizui/dist`; `npm test` runs Vitest; React 18 + TypeScript + Cytoscape + cytoscape-fcose installed.
 
-- [ ] **Step 1: Create package.json**
+- [x] **Step 1: Create package.json**
 
 Create `vizui/package.json`:
 
@@ -1552,7 +1576,7 @@ Create `vizui/package.json`:
 }
 ```
 
-- [ ] **Step 2: Create config files**
+- [x] **Step 2: Create config files**
 
 `vizui/vite.config.ts`:
 
@@ -1637,7 +1661,7 @@ node_modules/
 dist/
 ```
 
-- [ ] **Step 3: Minimal App.tsx (placeholder)**
+- [x] **Step 3: Minimal App.tsx (placeholder)**
 
 `vizui/src/App.tsx`:
 
@@ -1654,14 +1678,14 @@ export function App() {
 html, body, #root { height: 100%; margin: 0; background: #101418; color: #e8e8e8; }
 ```
 
-- [ ] **Step 4: Install + build + test commands**
+- [x] **Step 4: Install + build + test commands**
 
 Run: `npm install` in `vizui/`
 Run: `npm run build`
 Run: `npm run typecheck`
 Expected: build succeeds, typecheck clean, and `node_modules/` + `dist/` are gitignored.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add vizui .gitignore
@@ -1684,7 +1708,7 @@ git commit -m "feat(viz): frontend scaffold (Vite + React + TS + Cytoscape)"
   - `toCytoscape.ts`: `toElements(payload: GraphPayload): Cytoscape.ElementDefinition[]`;
   - `theme.ts`: `nodeColor(node)` and `label` helpers.
 
-- [ ] **Step 1: Write the failing mapping test**
+- [x] **Step 1: Write the failing mapping test**
 
 Create `vizui/src/graph/toCytoscape.test.ts`:
 
@@ -1732,12 +1756,12 @@ describe('toElements', () => {
 })
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `npm test` in `vizui/`
 Expected: FAIL — `Cannot find module './toCytoscape'`.
 
-- [ ] **Step 3: Implement the modules**
+- [x] **Step 3: Implement the modules**
 
 `vizui/src/types.ts`:
 
@@ -1879,7 +1903,10 @@ export async function fetchRepos(): Promise<RepoInfo[]> {
 }
 
 export async function fetchGraph(graphId: string, view: 'overview' | 'full', depth = 1): Promise<GraphPayload> {
-  return json(await fetch(`/api/graph/${encodeURIComponent(graphId)}?view=${view}&depth=${depth}`))
+  // graph_id carries slashes (`github.com/owner/name`) so it is always a
+  // query param, never a path segment.
+  const qs = new URLSearchParams({ graph_id: graphId, view, depth: String(depth) })
+  return json(await fetch(`/api/graph?${qs}`))
 }
 
 export async function fetchSubgraph(req: SubgraphRequest): Promise<GraphPayload> {
@@ -1899,7 +1926,8 @@ export async function fetchImpact(req: ImpactRequest): Promise<ImpactPayload> {
 }
 
 export async function expandDir(graphId: string, dir: string): Promise<ExpandResult> {
-  return json(await fetch(`/api/expand/${encodeURIComponent(graphId)}?dir=${encodeURIComponent(dir)}`))
+  const qs = new URLSearchParams({ graph_id: graphId, dir })
+  return json(await fetch(`/api/expand?${qs}`))
 }
 
 export async function search(graphId: string, q: string): Promise<SearchHit[]> {
@@ -1907,7 +1935,8 @@ export async function search(graphId: string, q: string): Promise<SearchHit[]> {
 }
 
 export async function fetchFileDetail(graphId: string, path: string): Promise<FileDetail> {
-  return json(await fetch(`/api/file/${encodeURIComponent(graphId)}/${path.split('/').map(encodeURIComponent).join('/')}`))
+  const qs = new URLSearchParams({ graph_id: graphId, path })
+  return json(await fetch(`/api/file?${qs}`))
 }
 ```
 
@@ -1983,12 +2012,12 @@ export function toElements(payload: GraphPayload): ElementDefinition[] {
 }
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `npm test` then `npm run typecheck` in `vizui/`
 Expected: PASS (3 tests), typecheck clean.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add vizui/src
@@ -2022,7 +2051,7 @@ export interface GraphCanvasProps {
 
 Behaviors required: zoom/pan; **zoom-gated labels** (labels appear only past zoom ≥ ~0.9 via `style` function reading `ele.cy().zoom()`); directional arrowheads; neighborhood highlight on `selectedNodeId` (blue-out / red-in, others `.faded`); `FlowOverlay` particle animation between hover node and its direct neighbors; minimap; layout switcher re-runs layout; `focusRequest` centers+zooms on that node.
 
-- [ ] **Step 1: Create style module**
+- [x] **Step 1: Create style module**
 
 `vizui/src/graph/style.ts`:
 
@@ -2056,11 +2085,11 @@ export const buildStyle = (): Stylesheet[] => [
     },
   },
   {
-    selector: 'node.symbol',
+    selector: 'node.node-symbol',
     style: { shape: 'rectangle', width: 26, height: 14, label: 'data(label)' },
   },
   {
-    selector: 'node.dir_cluster',
+    selector: 'node.node-dir_cluster',
     style: {
       shape: 'round-rectangle',
       width: 34,
@@ -2105,15 +2134,15 @@ export const buildStyle = (): Stylesheet[] => [
 ]
 ```
 
-- [ ] **Step 2: Create FlowOverlay (canvas particle animation)**
+- [x] **Step 2: Create FlowOverlay (canvas particle animation)**
 
 `vizui/src/graph/FlowOverlay.ts`:
 
 ```ts
-import type { Core } from 'cytoscape'
+import type { Core, NodeSingular } from 'cytoscape'
 
 let raf = 0
-let particles: { x: number; y: number; tx: number; ty: number; t: number }[] = []
+let offsets: number[] = []
 let active = false
 
 export function startFlow(cy: Core, nodeId: string | null): void {
@@ -2125,31 +2154,35 @@ export function startFlow(cy: Core, nodeId: string | null): void {
     return
   }
   const ele = cy.$id(nodeId)
-  if (ele.empty()) return
-  const { x, y } = ele.renderedPosition()
-  const targets = ele.connectedEdges().map((e) =>
-    e.otherNode(ele).empty() ? null : e.otherNode(ele).renderedPosition(),
-  ).filter((p): p is { x: number; y: number } => p !== null)
-  particles = targets.map((p, i) => ({
-    x,
-    y,
-    tx: p.x,
-    ty: p.y,
-    t: (i % 12) / 12,
-  }))
+  if (ele.empty()) {
+    stopFlow()
+    return
+  }
+  const neighbours: NodeSingular[] = ele
+    .connectedEdges()
+    .map((e) => e.otherNode(ele))
+    .filter((n) => !n.empty())
+  offsets = neighbours.map((_, i) => (i % 12) / 12)
   active = true
   cancelAnimationFrame(raf)
   const tick = (): void => {
+    // The canvas is CSS-stretched over the cytoscape viewport but its bitmap
+    // defaults to 300x150 — without this sync the particles are drawn to a
+    // different coordinate space than the one the user sees.
+    if (canvas.width !== canvas.clientWidth) canvas.width = canvas.clientWidth
+    if (canvas.height !== canvas.clientHeight) canvas.height = canvas.clientHeight
     ctx.clearRect(0, 0, canvas.width, canvas.height)
-    for (const p of particles) {
-      p.t = (p.t + 0.01) % 1
-      const px = p.x + (p.tx - p.x) * p.t
-      const py = p.y + (p.ty - p.y) * p.t
+    // Positions are re-read every frame so the particles track pan and zoom.
+    const from = ele.renderedPosition()
+    neighbours.forEach((n, i) => {
+      const to = n.renderedPosition()
+      offsets[i] = (offsets[i] + 0.01) % 1
+      const t = offsets[i]
       ctx.beginPath()
-      ctx.arc(px, py, 2.2, 0, Math.PI * 2)
+      ctx.arc(from.x + (to.x - from.x) * t, from.y + (to.y - from.y) * t, 2.2, 0, Math.PI * 2)
       ctx.fillStyle = '#7fc4ff'
       ctx.fill()
-    }
+    })
     if (active) raf = requestAnimationFrame(tick)
   }
   raf = requestAnimationFrame(tick)
@@ -2163,7 +2196,7 @@ export function stopFlow(): void {
 }
 ```
 
-- [ ] **Step 3: Create Minimap**
+- [x] **Step 3: Create Minimap**
 
 `vizui/src/components/Minimap.tsx`:
 
@@ -2219,12 +2252,12 @@ export function Minimap({ cy }: { cy: Core | null }) {
 }
 ```
 
-- [ ] **Step 4: Create GraphCanvas**
+- [x] **Step 4: Create GraphCanvas**
 
 `vizui/src/components/GraphCanvas.tsx`:
 
 ```tsx
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import cytoscape, {
   type Core,
   type ElementDefinition,
@@ -2250,6 +2283,9 @@ export interface GraphCanvasProps {
 export function GraphCanvas(props: GraphCanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const cyRef = useRef<Core | null>(null)
+  // Also held in state: mutating a ref never triggers a render, so a minimap
+  // gated on `cyRef.current` would never mount.
+  const [cyReady, setCyReady] = useState<Core | null>(null)
   const propsRef = useRef(props)
   propsRef.current = props
 
@@ -2265,12 +2301,15 @@ export function GraphCanvas(props: GraphCanvasProps) {
       wheelSensitivity: 0.25,
     })
     cyRef.current = cy
+    setCyReady(cy)
 
     cy.on('tap', 'node', (evt) => {
       propsRef.current.onNodeSelect(evt.target.id())
     })
-    cy.on('tappout', () => {
-      propsRef.current.onNodeSelect(null)
+    // Cytoscape has no `tappout`; a tap whose target is the core itself is
+    // the background click.
+    cy.on('tap', (evt) => {
+      if (evt.target === cy) propsRef.current.onNodeSelect(null)
     })
     cy.on('mouseover', 'node', (evt) => propsRef.current.onNodeHover(evt.target.id()))
     cy.on('mouseout', 'node', () => propsRef.current.onNodeHover(null))
@@ -2278,6 +2317,7 @@ export function GraphCanvas(props: GraphCanvasProps) {
     return () => {
       cy.destroy()
       cyRef.current = null
+      setCyReady(null)
       stopFlow()
     }
   }, [])
@@ -2343,18 +2383,18 @@ export function GraphCanvas(props: GraphCanvasProps) {
         id="flow-canvas"
         style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 5 }}
       />
-      {cyRef.current && <Minimap cy={cyRef.current} />}
+      {cyReady && <Minimap cy={cyReady} />}
     </div>
   )
 }
 ```
 
-- [ ] **Step 5: Verify typecheck + build**
+- [x] **Step 5: Verify typecheck + build**
 
 Run: `npm run typecheck` and `npm run build` in `vizui/`
 Expected: clean.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add vizui/src
@@ -2373,7 +2413,7 @@ git commit -m "feat(viz): cytoscape canvas with flows, labels, minimap, highligh
 - Consumes: all `api.ts` functions (Task 9), `GraphPayload`, `ImpactPayload`, `FileDetail`.
 - Produces: working app interactions wired to GraphCanvas (Task 10).
 
-- [ ] **Step 1: Create the code highlighter**
+- [x] **Step 1: Create the code highlighter**
 
 `vizui/src/components/highlight.tsx` (`.tsx` — the module renders JSX spans):
 
@@ -2413,7 +2453,7 @@ export function highlightLine(line: string, lang: string | null): ReactNode[] {
 
 Note: with the `react-jsx` transform, no `import React` is needed.
 
-- [ ] **Step 2: Create TopBar**
+- [x] **Step 2: Create TopBar**
 
 `vizui/src/components/TopBar.tsx`:
 
@@ -2474,7 +2514,7 @@ export function TopBar(props: TopBarProps) {
 }
 ```
 
-- [ ] **Step 3: Create DetailPanel**
+- [x] **Step 3: Create DetailPanel**
 
 `vizui/src/components/DetailPanel.tsx`:
 
@@ -2538,7 +2578,7 @@ export function DetailPanel({ detail, loading, onClose }: DetailPanelProps) {
 }
 ```
 
-- [ ] **Step 4: Create ImpactPanel**
+- [x] **Step 4: Create ImpactPanel**
 
 `vizui/src/components/ImpactPanel.tsx`:
 
@@ -2576,7 +2616,7 @@ export function ImpactPanel({ impact, loading, onClose }: ImpactPanelProps) {
 }
 ```
 
-- [ ] **Step 5: Compose App.tsx (full interaction flow)**
+- [x] **Step 5: Compose App.tsx (full interaction flow)**
 
 Replace `vizui/src/App.tsx`:
 
@@ -2771,12 +2811,12 @@ function dedupeEdges(edges: GraphPayload['edges']): GraphPayload['edges'] {
 
 Replace the version above accordingly. Also remove the unused `hoverId` from the callback deps if lint complains — keep `hoverId` as the impact trigger per the overlay button.
 
-- [ ] **Step 6: Verify**
+- [x] **Step 6: Verify**
 
 Run: `npm run typecheck` and `npm run build` in `vizui/`
 Expected: both clean. Fix any unused-import errors the TS config flags.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add vizui/src vizui/package-lock.json
@@ -2793,7 +2833,7 @@ git commit -m "feat(viz): panels, toolbar, and full app interaction flow"
 **Interfaces:**
 - Consumes: `create_app` static serving of `vizui/dist` (already wired in Task 5).
 
-- [ ] **Step 1: Add Makefile targets**
+- [x] **Step 1: Add Makefile targets**
 
 Modify `.PHONY` line and append:
 
@@ -2803,7 +2843,9 @@ Modify `.PHONY` line and append:
 viz:            ## run the local web UI (browser graph viewer)
 	uv run codegraph viz
 
-viz-dev:        ## run FastAPI + Vite dev servers (two processes)
+# Dev mode is two processes: this runs the API only — run `npm run dev` in
+# vizui/ from a second terminal for Vite on :5173 proxying /api.
+viz-dev:        ## run the API for dev mode (pair with `npm run dev` in vizui/)
 	uv run codegraph viz
 
 viz-build:      ## build the frontend bundle into vizui/dist
@@ -2812,16 +2854,16 @@ viz-build:      ## build the frontend bundle into vizui/dist
 
 `viz-dev` note: run `npm run dev` (Vite) in a second terminal — add a comment above the target.
 
-- [ ] **Step 2: Update README**
+- [x] **Step 2: Update README**
 
 Add a "## Local Web UI (`codegraph viz`)" section describing: prerequisites (Neo4j up via `make up`, a repo ingested via `codegraph ingest`, frontend built via `make viz-build`), then `make viz` → open `http://127.0.0.1:8787`. Dev flow: `make viz-dev` (+ `npm run dev` in `vizui/`) with Vite on `:5173` proxying `/api`. Mention the features (overview clusters, search, neighborhood highlight, impact view, detail panel with source).
 
-- [ ] **Step 3: Update CONTRIBUTING + data-flow explainer**
+- [x] **Step 3: Update CONTRIBUTING + data-flow explainer**
 
 - `CONTRIBUTING.md`: add "`make viz-build` + `make viz` are non-MCP features; `ruff`/`mypy` cover `src/codegraph/viz` and Vitest tests live under `vizui/src/**/*.test.ts`."
 - `docs/data-flow-explainer.md`: add one line in the app map: `codegraph serve` = MCP stdio; `codegraph viz` = separate browser process (no protocol channel).
 
-- [ ] **Step 4: Full validation**
+- [x] **Step 4: Full validation**
 
 Run: `make lint`
 Run: `make typecheck`
@@ -2829,7 +2871,7 @@ Run: `uv run pytest -m "not slow and not integration" -q`
 Run: `cd vizui && npm run build && npm test`
 Expected: all green.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add Makefile README.md CONTRIBUTING.md docs/data-flow-explainer.md
@@ -2842,12 +2884,12 @@ git commit -m "docs(viz): Makefile targets, README, and data-flow note"
 
 **Files:** none (verification + fix only).
 
-- [ ] **Step 1: Boot the stack**
+- [x] **Step 1: Boot the stack**
 
 Run: `make up` (Neo4j), `make viz-build`, then `make viz`.
 Open `http://127.0.0.1:8787` in a browser.
 
-- [ ] **Step 2: Verify happy path**
+- [x] **Step 2: Verify happy path**
 
 1. Repo dropdown lists ingested repos (e.g. `github.com/Ritesh-977/KampusCart` if present).
 2. Overview shows dir-cluster nodes; click `file:` node → detail panel opens with source.
@@ -2857,11 +2899,50 @@ Open `http://127.0.0.1:8787` in a browser.
 6. View → Full shows all files; layout switcher changes layout.
 7. Search jumps/focuses the match.
 
-- [ ] **Step 3: Verify error path**
+- [x] **Step 3: Verify error path**
 
 Stop Neo4j (`make down`), refresh → API returns the JSON hint ("run `make up`"), no stack trace in browser. Restart Neo4j.
 
-- [ ] **Step 4: Close out**
+- [x] **Step 4: Close out**
 
 Fix any issues found as follow-up commits (`git commit -m "fix(viz): ..."`).
 Final gate: `make lint typecheck test` green.
+
+---
+
+## Execution notes (post-implementation)
+
+Corrections made while executing this plan, all verified by tests:
+
+1. **`graph_id` cannot be a URL path segment.** Real slugs are
+   `github.com/owner/name` — two slashes — and the ASGI server percent-decodes
+   the path before routing, so `%2F` does not help. `/api/graph`, `/api/expand`
+   and `/api/file` take `graph_id` (and `path`) as query parameters.
+2. **`full_graph` now truncates rather than only flagging.** `_load_full` does
+   the uncapped read; `full_graph` caps edges and drops orphaned symbols;
+   `overview_graph` clusters the uncapped data.
+3. **`expand_dir` returns one level**, not every descendant: files directly in
+   the directory plus child `dir_cluster` nodes.
+4. **Only file nodes cluster.** A symbol's label is an import specifier
+   (`@react-oauth/google`, `../utils`); clustering those invented `dir:@react-oauth`
+   and `dir:..` nodes in the real repo's overview. Caught by smoke test.
+5. **cytoscape 3.34 ships its own typings.** `Stylesheet` is now
+   `StylesheetJson`, there is no `SingularElement`, no `EdgeSingular.otherNode`,
+   and `Css.Core` is not partial. `@types/cytoscape` was removed; a small
+   `declare module 'cytoscape-fcose'` shim was added.
+6. **Frontend fixes:** style selectors must be `node-<kind>` (matching
+   `toCytoscape`); `tappout` is not a cytoscape event; the flow canvas needs its
+   bitmap synced to its CSS size and positions re-read per frame; the minimap
+   needs cytoscape in state, not just a ref.
+7. **Test bugs in the plan itself:** the clustering test asserted id-sorted
+   output the implementation did not produce; the cytoscape mapping test
+   filtered nodes by an `id` prefix that edge ids share; the integration seed
+   Cypher (`CREATE ..., MERGE ...`) did not parse; a CLI test used `_cmd_viz`
+   without importing it; `impact()` had an unused `externals` variable that
+   fails `ruff`.
+
+Verified against the live graph (`github.com/Ritesh-977/KampusCart`, 121 files):
+overview returns `dir:client` + `dir:server`, expand returns one level, file
+detail returns real source with imports/dependents/functions, impact returns
+30 files at hop 1 and 11 at hop 2, and error paths return `{detail, hint}` with
+no traceback.

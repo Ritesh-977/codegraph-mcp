@@ -90,11 +90,14 @@ All endpoints read-only, all Cypher parameterized and `graph_id`-scoped
 | Endpoint | Purpose |
 |---|---|
 | `GET /api/repos` | Repo picker (uses `list_repos`). |
-| `GET /api/graph/{graph_id}?view=overview\|full` | `overview`: directory-clustered graph. `full`: all non-deleted `File` nodes + `IMPORTS` edges (File→File and File→Symbol), capped (>10k edges → `truncated:true` + hint to use overview). |
+| `GET /api/graph?graph_id=&view=overview\|full` | `overview`: directory-clustered graph. `full`: all non-deleted `File` nodes + `IMPORTS` edges (File→File and File→Symbol), capped (>10k edges → `truncated:true` + hint to use overview). |
 | `POST /api/subgraph` | Neighborhood: `{graph_id, seed_path, direction, depth, include_symbols}`. |
 | `POST /api/impact` | Blast-radius: `{graph_id, seed_path, max_hops}` — reuses `find_file_dependencies` logic; returns subgraph of transitive importers + callers. |
 | `GET /api/search?graph_id=&q=&kind=` | Across `search_nodes`; frontend focuses canvas on best match. |
-| `GET /api/file/{graph_id}/{path}` | Detail panel: metadata (`get_file_info`) + source text (`source_reader`) + functions defined with line ranges + import/caller lists. |
+| `GET /api/file?graph_id=&path=` | Detail panel: metadata (`get_file_info`) + source text (`source_reader`) + functions defined with line ranges + import/caller lists. |
+
+`graph_id` is a repo slug containing slashes (`github.com/owner/name`), so it is
+always a **query parameter** — never a URL path segment.
 
 ### 5.1 Wire format (UI schema, independent of MCP pydantic models)
 
