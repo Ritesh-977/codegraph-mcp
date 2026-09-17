@@ -66,3 +66,48 @@ def test_cli_ls_without_neo4j_returns_1(monkeypatch: object) -> None:  # type: i
     monkeypatch.setenv("NEO4J_PASSWORD", "wrong")  # type: ignore[attr-defined]
     rc = main(["ls"])
     assert rc == 1
+
+
+def test_reset_removes_clone_cache_by_default(tmp_path) -> None:
+    """6.4: reset used to wipe Neo4j but leave the working tree on disk, so a
+    'reset' repo still had stale files and the cache grew unbounded."""
+    from codegraph.cli import _remove_clone
+
+    clone = tmp_path / "github.com__o__n"
+    (clone / ".git").mkdir(parents=True)
+    (clone / "file.py").write_text("x")
+
+    _remove_clone(tmp_path, "github.com/o/n")
+    assert not clone.exists()
+
+
+def test_reset_clone_removal_is_safe_when_absent(tmp_path) -> None:
+    from codegraph.cli import _remove_clone
+
+    _remove_clone(tmp_path, "github.com/never/ingested")  # must not raise
+
+
+def test_reset_parser_exposes_keep_clone() -> None:
+    from codegraph.cli import _build_parser
+
+    args = _build_parser().parse_args(["reset", "--graph-id", "o/n", "--keep-clone"])
+    assert args.keep_clone is True
+    assert _build_parser().parse_args(["reset", "--graph-id", "o/n"]).keep_clone is False
+
+
+def test_cli_viz_parser_exposes_host_port() -> None:
+    from codegraph.cli import _build_parser
+
+    args = _build_parser().parse_args(["viz", "--host", "0.0.0.0", "--port", "9999"])
+    assert args.cmd == "viz"
+    assert args.host == "0.0.0.0"
+    assert args.port == 9999
+
+
+def test_cli_viz_defaults_host_port_to_none() -> None:
+    from codegraph.cli import _build_parser, _cmd_viz
+
+    args = _build_parser().parse_args(["viz"])
+    assert args.host is None
+    assert args.port is None
+    assert callable(_cmd_viz)
