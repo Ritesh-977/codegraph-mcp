@@ -163,6 +163,19 @@ cd vizui && npm run dev         # terminal 2 — Vite on :5173, proxies /api
 Configure the bind address with `VIZ_HOST` / `VIZ_PORT` (defaults
 `127.0.0.1:8787` — loopback, since this serves a whole repo's source).
 
+**If `uv run` fails with `failed to remove file ... codegraph.exe ... used by
+another process`:** a running `codegraph serve` (spawned by your MCP host) is
+holding the entry point, and `uv` wants to replace it after a dependency
+change. Either skip the reinstall:
+
+```bash
+uv run --no-sync codegraph viz
+```
+
+or do it once properly — stop the MCP server (`Stop-Process -Id <pid>` on
+Windows, where `<pid>` comes from `tasklist | findstr codegraph`), run
+`uv sync --extra dev`, and let the host respawn it.
+
 ## Tech stack
 
 Python 3.11+, `mcp>=1.27,<2` (stable v1.x FastMCP), Neo4j 5.x, pydantic v2, tree-sitter, GitPython, pytest, ruff, mypy, uv. The web UI adds FastAPI + uvicorn on the backend and Vite + React + Cytoscape.js on the frontend.
