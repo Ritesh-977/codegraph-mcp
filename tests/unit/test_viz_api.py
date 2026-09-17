@@ -146,3 +146,23 @@ def test_file_detail_missing_is_404_with_hint() -> None:
 def test_unknown_route_is_404(client) -> None:
     r = client.get("/api/doesnotexist")
     assert r.status_code == 404
+
+
+def test_db_failure_is_500_with_hint_and_no_stack_trace() -> None:
+    """Neo4j being down must read as guidance, not a traceback."""
+
+    class Down(FakeAdapter):
+        async def list_repos(self):
+            raise ConnectionError("Unable to retrieve routing information")
+
+    app = create_app(Settings(repos_dir=Path(tempfile.mkdtemp())), adapter=Down())
+    # raise_server_exceptions=False: Starlette's ServerErrorMiddleware sends the
+    # handler's response and then re-raises, which the test client would
+    # otherwise surface instead of the response a browser gets.
+    with TestClient(app, raise_server_exceptions=False) as c:
+        r = c.get("/api/repos")
+    assert r.status_code == 500
+    body = r.json()
+    assert body["detail"] == "internal error"
+    assert "make up" in body["hint"]
+    assert "Traceback" not in r.text

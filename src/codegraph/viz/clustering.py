@@ -31,19 +31,23 @@ def build_cluster_graph(
     nodes: list[GraphNode], edges: list[GraphEdge], depth: int
 ) -> tuple[list[GraphNode], list[GraphEdge]]:
     """Cluster ``nodes``/``edges`` at ``depth``; return sorted cluster nodes+edges."""
-    path_by_id = {n.id: n.path or n.label for n in nodes}
-
+    # Only file nodes cluster. A symbol's label is an import specifier —
+    # "@react-oauth/google", "../utils", "./App" — and splitting those on "/"
+    # invents directories (`dir:@react-oauth`, `dir:..`) that exist nowhere in
+    # the repo. Symbols pass through untouched.
+    key_by_id: dict[str, str | None] = {}
     clusters: dict[str, int] = defaultdict(int)
     shallow: list[GraphNode] = []
     for n in nodes:
-        key = cluster_key(n.path or n.label, depth)
+        key = cluster_key(n.path, depth) if (n.kind == "file" and n.path) else None
+        key_by_id[n.id] = key
         if key is None:
             shallow.append(n)
         else:
             clusters[key] += 1
 
     def resolve(nid: str) -> str:
-        key = cluster_key(path_by_id[nid], depth)
+        key = key_by_id.get(nid)
         return f"dir:{key}" if key is not None else nid
 
     out_nodes: list[GraphNode] = shallow[:]

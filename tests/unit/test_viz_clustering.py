@@ -49,3 +49,23 @@ def test_build_cluster_graph_groups_and_aggregates() -> None:
     assert agg[("dir:src", "dir:lib")] == 1
     # deterministic ordering
     assert [n.id for n in cn] == sorted(n.id for n in cn)
+
+
+def test_symbols_are_never_clustered_as_directories() -> None:
+    """An import specifier is not a path.
+
+    `@react-oauth/google` and `../utils` contain slashes but name packages,
+    not directories — clustering them invented `dir:@react-oauth` and `dir:..`
+    nodes in the overview of a real repo.
+    """
+    nodes = [
+        GraphNode(id="sym:@react-oauth/google", kind="symbol", label="@react-oauth/google"),
+        GraphNode(id="sym:../utils", kind="symbol", label="../utils"),
+        _node("file:src/a.py", "src/a.py"),
+    ]
+    edges = [GraphEdge(source="file:src/a.py", target="sym:@react-oauth/google", type="IMPORTS")]
+    cn, ce = build_cluster_graph(nodes, edges, depth=1)
+    assert {n.id for n in cn} == {"sym:@react-oauth/google", "sym:../utils", "dir:src"}
+    assert not any(n.id.startswith("dir:@") or n.id == "dir:.." for n in cn)
+    # the file->symbol edge survives, rewired to the file's cluster
+    assert [(e.source, e.target) for e in ce] == [("dir:src", "sym:@react-oauth/google")]
