@@ -139,3 +139,34 @@ def test_impact_rings() -> None:
 def test_file_detail_missing_file_raises() -> None:
     with pytest.raises(ValueError):
         asyncio.run(_svc().file_detail("o/n", "nonexistent.py"))
+
+
+def test_full_graph_nodes_carry_layout_metrics() -> None:
+    out = asyncio.run(_svc().full_graph("o/n"))
+    by_id = {n.id: n for n in out.nodes}
+    # api.py imports auth.py imports db.py -> three descending layers
+    assert by_id["file:api.py"].layer == 0
+    assert by_id["file:auth.py"].layer == 1
+    assert by_id["file:db.py"].layer == 2
+    assert by_id["file:auth.py"].fan_in == 1
+    # symbols are external leaves, not part of the architecture
+    assert by_id["sym:os"].layer is None
+
+
+def test_overview_clusters_carry_their_own_metrics() -> None:
+    out = asyncio.run(_svc().overview_graph("o/n"))
+    lib = next(n for n in out.nodes if n.id == "dir:lib")
+    assert lib.layer is not None
+    assert lib.fan_in == 1
+
+
+def test_findings_reports_hubs_entries_orphans_cycles() -> None:
+    f = asyncio.run(_svc().findings("o/n"))
+    assert f.file_count == 4
+    assert [h.path for h in f.hubs][:1] == ["auth.py"]
+    assert f.entry_points == ["api.py"]
+    assert f.cycles == []
+    assert f.max_layer == 2
+    # no clone on disk in the fake -> coupling degrades with a hint
+    assert f.coupling_available is False
+    assert f.coupling_hint

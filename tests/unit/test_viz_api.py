@@ -166,3 +166,13 @@ def test_db_failure_is_500_with_hint_and_no_stack_trace() -> None:
     assert body["detail"] == "internal error"
     assert "make up" in body["hint"]
     assert "Traceback" not in r.text
+
+
+def test_findings_endpoint(client) -> None:
+    r = client.get("/api/findings", params={"graph_id": "o/n"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["file_count"] == 2
+    assert "hubs" in body and "orphans" in body and "cycles" in body
+    assert body["coupling_available"] is False
+    assert body["coupling_hint"]

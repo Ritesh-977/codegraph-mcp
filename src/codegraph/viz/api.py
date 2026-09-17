@@ -97,6 +97,10 @@ def create_app(settings: Settings, *, adapter: Neo4jAdapter | None = None) -> Fa
     async def impact(req: ImpactRequest) -> Any:
         return await _svc().impact(req)
 
+    @app.get("/api/findings")
+    async def findings(graph_id: str) -> Any:
+        return await _svc().findings(graph_id)
+
     @app.get("/api/expand")
     async def expand(graph_id: str, dir: str = Query("")) -> Any:
         return await _svc().expand_dir(graph_id, dir)

@@ -21,6 +21,13 @@ class GraphNode(BaseModel):
     path: str | None = None
     language: str | None = None
     file_count: int | None = None
+    # Structural metrics drive the layered layout: `layer` is the row (longest
+    # path from an entry point) and `fan_in` the node radius. None for symbols,
+    # which are external leaves rather than part of the architecture.
+    layer: int | None = None
+    fan_in: int | None = None
+    fan_out: int | None = None
+    in_cycle: bool = False
 
 
 class GraphEdge(BaseModel):
@@ -105,3 +112,41 @@ class FileDetailResponse(BaseModel):
     imported_by: list[str] = []
     imports: list[str] = []
     external_symbols: list[str] = []
+
+
+class HubEntry(BaseModel):
+    path: str
+    dependents: int
+    dependencies: int
+
+
+class CycleEntry(BaseModel):
+    paths: list[str]
+
+
+class CouplingEntry(BaseModel):
+    """Two files that keep changing in the same commit.
+
+    ``has_import_edge=False`` is the interesting case: they are coupled in
+    practice with nothing in the code to say so.
+    """
+
+    a: str
+    b: str
+    shared_commits: int
+    strength: float
+    has_import_edge: bool
+
+
+class FindingsPayload(BaseModel):
+    graph_id: str
+    file_count: int
+    edge_count: int
+    max_layer: int
+    hubs: list[HubEntry] = []
+    entry_points: list[str] = []
+    orphans: list[str] = []
+    cycles: list[CycleEntry] = []
+    coupling: list[CouplingEntry] = []
+    coupling_available: bool = True
+    coupling_hint: str | None = None

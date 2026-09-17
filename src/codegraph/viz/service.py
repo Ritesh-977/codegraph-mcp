@@ -16,20 +16,30 @@ from typing import Any
 from codegraph.models.common import MAX_TRAVERSAL_HOPS
 from codegraph.repo.neo4j_adapter import Neo4jAdapter
 from codegraph.source_reader import read_source_range
+from codegraph.viz.analysis import GraphMetrics, analyze
+from codegraph.viz.churn import co_change_pairs, read_history
 from codegraph.viz.clustering import build_cluster_graph
 from codegraph.viz.models import (
+    CouplingEntry,
+    CycleEntry,
     ExpandResult,
     FileDetailResponse,
+    FindingsPayload,
     FunctionInfo,
     GraphEdge,
     GraphNode,
     GraphPayload,
     GraphStats,
+    HubEntry,
     ImpactPayload,
     ImpactRequest,
     ImpactRing,
     SubgraphRequest,
 )
+
+MAX_HUBS = 15
+MAX_ORPHANS = 50
+MAX_COUPLING = 20
 
 
 def _hop_bound(depth: int) -> int:
@@ -45,6 +55,28 @@ def _hop_bound(depth: int) -> int:
 
 def _basename(path: str) -> str:
     return path.rsplit("/", 1)[-1]
+
+
+def _apply_metrics(nodes: list[GraphNode], edges: list[GraphEdge]) -> GraphMetrics:
+    """Annotate structural nodes in place so the layered layout can place them.
+
+    Only file/dir nodes participate: a Symbol is an external package, not a
+    layer of this codebase, and giving it a row would flatten the picture.
+    """
+    structural = {n.id for n in nodes if n.kind in ("file", "dir_cluster")}
+    metrics = analyze(
+        structural,
+        [(e.source, e.target) for e in edges if e.source in structural and e.target in structural],
+    )
+    in_cycle = {p for cycle in metrics.cycles for p in cycle}
+    for n in nodes:
+        if n.id not in structural:
+            continue
+        n.layer = metrics.layer.get(n.id, 0)
+        n.fan_in = metrics.fan_in.get(n.id, 0)
+        n.fan_out = metrics.fan_out.get(n.id, 0)
+        n.in_cycle = n.id in in_cycle
+    return metrics
 
 
 class VizService:
@@ -111,6 +143,9 @@ class VizService:
 
     async def full_graph(self, graph_id: str, max_edges: int = 10_000) -> GraphPayload:
         nodes, edges, file_count = await self._load_full(graph_id)
+        # Metrics come from the complete graph: layering computed after a cap
+        # would be a layering of an arbitrary subset, i.e. a lie.
+        _apply_metrics(nodes, edges)
         truncated = len(edges) > max_edges
         if truncated:
             # Actually cap the payload, don't just flag it: a 5k-file repo
@@ -136,6 +171,7 @@ class VizService:
     async def overview_graph(self, graph_id: str, depth: int = 1) -> GraphPayload:
         nodes_all, edges_all, file_count = await self._load_full(graph_id)
         nodes, edges = build_cluster_graph(nodes_all, edges_all, depth)
+        _apply_metrics(nodes, edges)
         return GraphPayload(
             graph_id=graph_id,
             view="overview",
@@ -216,10 +252,12 @@ class VizService:
             name = e.target.split(":", 1)[1]
             nodes.append(GraphNode(id=f"sym:{name}", kind="symbol", label=name))
         edges = _dedup_edges(edges + symbols)
+        out_nodes = _dedup_nodes(nodes)
+        _apply_metrics(out_nodes, edges)
         return GraphPayload(
             graph_id=req.graph_id,
             view="subgraph",
-            nodes=_dedup_nodes(nodes),
+            nodes=out_nodes,
             edges=edges,
             stats=GraphStats(file_count=len(paths), edge_count=len(edges), view="subgraph"),
         )
@@ -244,6 +282,64 @@ class VizService:
             callers=callers,
             calls=calls,
             truncated=res["truncated"],
+        )
+
+    async def findings(self, graph_id: str) -> FindingsPayload:
+        """The questions a senior dev actually asks of an unfamiliar codebase.
+
+        What is the spine (hubs), where do I start (entry points), what is
+        dead (orphans), what is tangled (cycles), and what changes together
+        without saying so in the imports (coupling).
+        """
+        nodes, edges, file_count = await self._load_full(graph_id)
+        files = {n.id for n in nodes if n.kind == "file"}
+        ff = [(e.source, e.target) for e in edges if e.source in files and e.target in files]
+        m = analyze(files, ff)
+
+        def path(nid: str) -> str:
+            return nid[5:] if nid.startswith("file:") else nid
+
+        hubs = [
+            HubEntry(
+                path=path(nid),
+                dependents=count,
+                dependencies=m.fan_out.get(nid, 0),
+            )
+            for nid, count in m.hubs[:MAX_HUBS]
+            if count > 0
+        ]
+        history = read_history(self._repos_dir, graph_id)
+        known = {path(f) for f in files}
+        coupling: list[CouplingEntry] = []
+        if history:
+            import_pairs = {tuple(sorted((path(s), path(t)))) for s, t in ff}
+            coupling = [
+                CouplingEntry(
+                    a=c.a,
+                    b=c.b,
+                    shared_commits=c.shared,
+                    strength=round(c.strength, 3),
+                    has_import_edge=(c.a, c.b) in import_pairs,
+                )
+                for c in co_change_pairs(history, known)[:MAX_COUPLING]
+            ]
+        return FindingsPayload(
+            graph_id=graph_id,
+            file_count=file_count,
+            edge_count=len(ff),
+            max_layer=m.max_layer,
+            hubs=hubs,
+            entry_points=[path(n) for n in m.entry_points],
+            orphans=[path(n) for n in m.orphans[:MAX_ORPHANS]],
+            cycles=[CycleEntry(paths=[path(p) for p in c]) for c in m.cycles],
+            coupling=coupling,
+            coupling_available=bool(history),
+            coupling_hint=(
+                None
+                if history
+                else "No local clone with git history for this repo — run "
+                "`codegraph ingest --force` to refresh it, then reload."
+            ),
         )
 
     async def expand_dir(self, graph_id: str, dir_prefix: str) -> ExpandResult:
