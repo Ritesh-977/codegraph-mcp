@@ -15,6 +15,8 @@ _EXT_LANG = {
     ".py": "py",
     ".js": "js", ".mjs": "js", ".cjs": "js",
     ".ts": "ts", ".tsx": "tsx", ".jsx": "tsx",
+    ".java": "java",
+    ".kt": "kotlin", ".kts": "kotlin",
 }
 
 _SKIP_DIRS = {

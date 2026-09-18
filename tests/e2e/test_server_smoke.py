@@ -1,4 +1,4 @@
-"""E2e: verify the server has all 6 tools registered and callable structure is correct.
+"""E2e: verify the server has all 9 tools registered and callable structure is correct.
 
 This test doesn't need a running Neo4j — it verifies the server's tool registry
 structure, not actual tool execution. It uses the FastMCP internal API to inspect
@@ -12,8 +12,8 @@ import pytest
 pytestmark = pytest.mark.slow
 
 
-def test_all_six_tools_registered() -> None:
-    """The server must have all 6 tools registered."""
+def test_all_nine_tools_registered() -> None:
+    """The server must have all 9 tools registered."""
     from codegraph.server import mcp
 
     tm = getattr(mcp, "_tool_manager", None)
@@ -27,6 +27,9 @@ def test_all_six_tools_registered() -> None:
         "find_file_dependencies",
         "search_nodes",
         "get_node_detail",
+        "get_file_content",
+        "get_function_source",
+        "get_file_metadata",
     }
     assert expected == names, f"tool mismatch: extra={names - expected}, missing={expected - names}"
 

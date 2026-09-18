@@ -9,4 +9,4 @@ repos/
 *.egg-info/
 dist/
 build/
-.superpowers/
+.superpowers/node_modules/

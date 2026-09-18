@@ -34,12 +34,16 @@ class CodeGraphRepository(Protocol):
         self, *, graph_id: str, path: str, limit: int
     ) -> dict[str, Any]: ...
 
+    async def get_file_info(
+        self, *, graph_id: str, file_path: str
+    ) -> dict[str, Any] | None: ...
+
     async def find_file_dependencies(
         self, *, graph_id: str, file_path: str, direction: str, max_hops: int
     ) -> dict[str, Any]: ...
 
     async def search_nodes(
-        self, *, graph_id: str, query: str, kind: str, limit: int
+        self, *, graph_id: str, query: str, kind: str, limit: int, offset: int = 0
     ) -> list[dict[str, Any]]: ...
 
     async def get_node_detail(

@@ -22,4 +22,5 @@ async def init_repository_node(
         url=info["url"],
         file_count=int(info.get("file_count", 0)),
         function_count=int(info.get("function_count", 0)),
+        ingest_status=info.get("ingest_status"),
     )

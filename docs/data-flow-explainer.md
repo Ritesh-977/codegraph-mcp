@@ -15,6 +15,11 @@ Claude Desktop and type:
 
 Here's what happens, step by step.
 
+> **Two processes, one graph.** `codegraph serve` is the MCP server traced
+> below: JSON-RPC over stdin/stdout, spawned by the host. `codegraph viz` is a
+> separate, read-only HTTP process serving the browser UI over the same Neo4j
+> data — no MCP protocol channel, and no effect on the stdout traced here.
+
 ---
 
 ## Step 1: Claude Desktop spawns the MCP server

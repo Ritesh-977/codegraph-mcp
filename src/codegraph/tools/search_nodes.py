@@ -14,5 +14,9 @@ async def search_nodes(
         query=args.query,
         kind=args.kind,
         limit=args.limit,
+        offset=args.offset,
     )
-    return SearchNodesResult(hits=[SearchHit(**r) for r in rows])
+    hits = [SearchHit(**r) for r in rows]
+    # A full page implies there may be more; the caller pages with this.
+    nxt = args.offset + args.limit if len(hits) == args.limit else None
+    return SearchNodesResult(hits=hits, next_offset=nxt)

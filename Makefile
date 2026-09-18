@@ -1,4 +1,4 @@
-.PHONY: dev install up down test test-slow lint typecheck inspector run serve snapshot-update
+.PHONY: dev install up down test test-slow lint typecheck inspector run serve snapshot-update viz viz-dev viz-build viz-test
 
 dev:            ## install dev deps
 	uv sync --extra dev
@@ -35,3 +35,17 @@ serve:          ## alias for run
 
 snapshot-update:  ## regenerate contract snapshots
 	uv run pytest tests/contract --snapshot-update
+
+viz:            ## run the local web UI (browser graph viewer)
+	uv run codegraph viz
+
+# Dev mode is two processes: this runs the API only — run `npm run dev` in
+# vizui/ from a second terminal for Vite on :5173 proxying /api.
+viz-dev:        ## run the API for dev mode (pair with `npm run dev` in vizui/)
+	uv run codegraph viz
+
+viz-build:      ## build the frontend bundle into vizui/dist
+	cd vizui && npm install && npm run build
+
+viz-test:       ## frontend unit tests + typecheck
+	cd vizui && npm test && npm run typecheck

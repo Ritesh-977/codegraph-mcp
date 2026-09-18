@@ -9,6 +9,12 @@ from pydantic import BeforeValidator
 
 _GRAPH_ID_RE = re.compile(r"^[A-Za-z0-9._/-]+$")
 
+# Upper bound for find_file_dependencies traversal depth. Enforced in two
+# places — the pydantic arg model and the adapter's literal-embedding guard —
+# so it lives here to keep them from drifting apart. Neo4j variable-length
+# path cost grows sharply with depth; this is a guardrail, not a preference.
+MAX_TRAVERSAL_HOPS = 10
+
 
 def _normalize_filepath(v: str) -> str:
     """Normalize to repo-relative POSIX: backslashes → forward slashes, strip leading ./."""

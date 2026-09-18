@@ -5,9 +5,9 @@ This document is the single source of truth for scope, architecture, and convent
 ## 1. Architecture (three-phase split)
 
 1. **Ingestion (CLI, offline):** `codegraph ingest <url>` clones, walks, parses
-   (Python `ast` + tree-sitter for JS/TS), collects commit metadata, and writes
+   (Python `ast` + tree-sitter for JS/TS/TSX, Java, Kotlin), collects commit metadata, and writes
    parameterized Cypher `MERGE`s to Neo4j under a per-repo `graph_id`.
-2. **MCP server (stdio):** a FastMCP server exposes 6 read-only tools + 2 resources
+2. **MCP server (stdio):** a FastMCP server exposes 9 read-only tools + 2 resources
    that query the same Neo4j. It never clones, parses, or writes.
 3. **MCP host:** Claude Desktop / opencode / Cursor spawns the server via `mcpServers`
    config; the LLM calls tools to answer developer questions.
@@ -39,7 +39,7 @@ Neo4j is the only durable store. The server holds no graph state in memory.
 | **unit** | Pure logic: parsers, walker, resolver, Cypher string assertions, model validation |
 | **integration** | Neo4j-backed via testcontainers-python; tool module happy + error paths |
 | **contract** | Golden snapshot of tool names + descriptions |
-| **e2e** | Server smoke: all 6 tools + 2 resources registered |
+| **e2e** | Server smoke: all 9 tools + 2 resources registered |
 
 ### CI gates (every push)
 
@@ -47,6 +47,11 @@ Neo4j is the only durable store. The server holds no graph state in memory.
 - `mypy src`
 - `pytest -m "not slow and not integration"`
 - Contract snapshot diff passes
+
+`ruff` and `mypy` cover `src/codegraph/viz` like the rest of `src/`. The web
+UI's own tests are separate: `make viz-test` runs Vitest + `tsc --noEmit` over
+`vizui/src/**`. `make viz-build` produces `vizui/dist`, which FastAPI serves —
+it is gitignored, so a fresh clone must build it before `make viz` shows a UI.
 
 ## 4. CLI Reference
 
@@ -56,6 +61,7 @@ Neo4j is the only durable store. The server holds no graph state in memory.
 | `codegraph serve` | Run MCP server (stdio) |
 | `codegraph reset --graph-id X` | Hard-wipe one repo (destructive) |
 | `codegraph ls` | List ingested repos |
+| `codegraph viz` | Local web UI (separate process; read-only) |
 
 ## 5. Glossary
 
@@ -69,4 +75,4 @@ Neo4j is the only durable store. The server holds no graph state in memory.
 | **Bolt** | Neo4j's binary protocol (port 7687) |
 | **Cypher** | Neo4j's declarative graph query language |
 | **Soft-delete tombstone** | `deleted=true` flag on File nodes; never hard-deleted by tools |
-| **tree-sitter** | Incremental parsing library; used for JS/TS/TSX |
+| **tree-sitter** | Incremental parsing library; used for JS/TS/TSX, Java, Kotlin |

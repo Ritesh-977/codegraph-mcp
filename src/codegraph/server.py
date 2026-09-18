@@ -10,17 +10,23 @@ import contextlib
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from typing import Any
+from pathlib import Path
+from typing import Annotated, Any, Literal
 
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.server.fastmcp.exceptions import ToolError
 from mcp.server.session import ServerSession
 from mcp.types import CallToolResult, TextContent
+from pydantic import Field
 
 from codegraph.config import Settings
 from codegraph.logging_setup import setup_logging
+from codegraph.models.common import MAX_TRAVERSAL_HOPS
 from codegraph.models.tools import (
     FindFileDependenciesArgs,
+    GetFileContentArgs,
+    GetFileMetadataArgs,
+    GetFunctionSourceArgs,
     GetNodeDetailArgs,
     GetRepoStructureArgs,
     InitRepositoryNodeArgs,
@@ -32,6 +38,7 @@ from codegraph.repo.neo4j_adapter import Neo4jAdapter
 @dataclass
 class AppState:
     adapter: Neo4jAdapter
+    repos_dir: Path
 
 
 # Module-level handle to the active AppState. Set by the lifespan so resource
@@ -52,7 +59,7 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[AppState]:
         with contextlib.suppress(Exception):
             await adapter.close()
         raise RuntimeError(f"failed to initialize codegraph backend: {ex}") from ex
-    state = AppState(adapter=adapter)
+    state = AppState(adapter=adapter, repos_dir=settings.repos_dir)
     _ACTIVE_STATE = state
     try:
         yield state
@@ -149,6 +156,8 @@ async def get_repo_structure(
         result = await _impl(
             state.adapter, GetRepoStructureArgs(graph_id=graph_id, path=path, limit=limit)
         )
+    except ValueError as ex:
+        raise ToolError(f"Invalid arguments for get_repo_structure: {ex}") from ex
     except Exception as ex:
         raise ToolError(
             f"Failed to get structure for '{graph_id}/{path}': {ex}. Check the repo is ingested."
@@ -174,12 +183,13 @@ async def find_file_dependencies(
     ctx: Context[ServerSession, AppState],
     graph_id: str,
     file_path: str,
-    direction: str = "both",
-    max_hops: int = 2,
+    direction: Literal["imports", "imported_by", "both"] = "both",
+    max_hops: Annotated[int, Field(ge=0, le=MAX_TRAVERSAL_HOPS)] = 2,
 ) -> CallToolResult:
     """Find what files/functions depend on (or are depended on by) a given file.
     Use this to answer 'what breaks if I edit X?'. Returns imported_by, imports,
-    callers, calls, and external symbols (stdlib/npm)."""
+    callers, calls, and external symbols (stdlib/npm). Deeper max_hops costs
+    more query time; results are capped per category with truncated=true."""
     from codegraph.tools.find_file_dependencies import find_file_dependencies as _impl
 
     state = get_state(ctx)
@@ -190,6 +200,10 @@ async def find_file_dependencies(
                 graph_id=graph_id, file_path=file_path, direction=direction, max_hops=max_hops
             ),
         )
+    except ValueError as ex:
+        # Bad arguments (e.g. max_hops out of range, unknown direction) — say so
+        # plainly instead of sending the caller off to debug Neo4j.
+        raise ToolError(f"Invalid arguments for find_file_dependencies: {ex}") from ex
     except Exception as ex:
         raise ToolError(
             f"Failed to find dependencies for '{file_path}' in '{graph_id}': {ex}. "
@@ -233,18 +247,26 @@ async def search_nodes(
     ctx: Context[ServerSession, AppState],
     graph_id: str,
     query: str,
-    kind: str = "any",
+    kind: Literal["any", "function", "file"] = "any",
     limit: int = 10,
+    offset: int = 0,
 ) -> CallToolResult:
-    """Search for functions or files by name. Use this before find_file_dependencies
-    or get_node_detail to find the exact path or node id."""
+    """Search for functions or files by name, ranked by relevance (best first).
+    Use this before find_file_dependencies or get_node_detail to find the exact
+    path or node id. Page through large result sets with offset; the result's
+    next_offset is set when more may exist."""
     from codegraph.tools.search_nodes import search_nodes as _impl
 
     state = get_state(ctx)
     try:
         result = await _impl(
-            state.adapter, SearchNodesArgs(graph_id=graph_id, query=query, kind=kind, limit=limit)
+            state.adapter,
+            SearchNodesArgs(
+                graph_id=graph_id, query=query, kind=kind, limit=limit, offset=offset
+            ),
         )
+    except ValueError as ex:
+        raise ToolError(f"Invalid arguments for search_nodes: {ex}") from ex
     except Exception as ex:
         raise ToolError(
             f"Search failed for '{query}' in '{graph_id}': {ex}. "
@@ -285,6 +307,110 @@ async def get_node_detail(
         summary += f"  path: {result.path}"
     if result.start_line:
         summary += f"  lines: {result.start_line}-{result.end_line}"
+    return CallToolResult(
+        content=[TextContent(type="text", text=summary)],
+        structuredContent=result.model_dump(),
+    )
+
+
+@mcp.tool()
+async def get_file_content(
+    ctx: Context[ServerSession, AppState],
+    graph_id: str,
+    file_path: str,
+    start_line: int | None = None,
+    end_line: int | None = None,
+) -> CallToolResult:
+    """Return real source code text for a file (not just metadata). Honors
+    deleted files (tombstones). Use start_line/end_line to slice a range;
+    omit both for the whole file (capped at ~2000 lines, truncated=true if
+    exceeded)."""
+    from codegraph.tools.get_file_content import get_file_content as _impl
+
+    state = get_state(ctx)
+    try:
+        result = await _impl(
+            state.adapter,
+            state.repos_dir,
+            GetFileContentArgs(
+                graph_id=graph_id, file_path=file_path, start_line=start_line, end_line=end_line
+            ),
+        )
+    except ValueError as ex:
+        raise ToolError(str(ex)) from ex
+    except Exception as ex:
+        raise ToolError(
+            f"Failed to read '{file_path}' in '{graph_id}': {ex}. "
+            f"Verify the repo is ingested and the on-disk clone still exists."
+        ) from ex
+    summary = f"{result.path} ({result.language}), lines {result.start_line}-{result.end_line}"
+    if result.truncated:
+        summary += " [truncated]"
+    return CallToolResult(
+        content=[TextContent(type="text", text=f"{summary}\n\n{result.content}")],
+        structuredContent=result.model_dump(),
+    )
+
+
+@mcp.tool()
+async def get_function_source(
+    ctx: Context[ServerSession, AppState],
+    graph_id: str,
+    node_id: str,
+) -> CallToolResult:
+    """Return one function's source code body by its node id (from
+    search_nodes or get_node_detail)."""
+    from codegraph.tools.get_function_source import get_function_source as _impl
+
+    state = get_state(ctx)
+    try:
+        result = await _impl(
+            state.adapter, state.repos_dir, GetFunctionSourceArgs(graph_id=graph_id, node_id=node_id)
+        )
+    except ValueError as ex:
+        raise ToolError(str(ex)) from ex
+    except Exception as ex:
+        raise ToolError(
+            f"Failed to read function '{node_id}' in '{graph_id}': {ex}. "
+            f"Use search_nodes to find a valid function node id."
+        ) from ex
+    summary = f"{result.name} in {result.path}, lines {result.start_line}-{result.end_line}"
+    if result.truncated:
+        summary += " [truncated]"
+    return CallToolResult(
+        content=[TextContent(type="text", text=f"{summary}\n\n{result.content}")],
+        structuredContent=result.model_dump(),
+    )
+
+
+@mcp.tool()
+async def get_file_metadata(
+    ctx: Context[ServerSession, AppState],
+    graph_id: str,
+    file_path: str,
+) -> CallToolResult:
+    """Who last touched a file, and when — last author, commit date, and sha.
+    Use for ownership and staleness triage. Fields are null if the repo was
+    ingested without git history."""
+    from codegraph.tools.get_file_metadata import get_file_metadata as _impl
+
+    state = get_state(ctx)
+    try:
+        result = await _impl(
+            state.adapter, GetFileMetadataArgs(graph_id=graph_id, file_path=file_path)
+        )
+    except ValueError as ex:
+        raise ToolError(str(ex)) from ex
+    except Exception as ex:
+        raise ToolError(
+            f"Failed to read metadata for '{file_path}' in '{graph_id}': {ex}. "
+            f"Verify Neo4j is running and the repo is ingested."
+        ) from ex
+    summary = (
+        f"{result.path} — last touched by {result.last_author or 'unknown'}"
+        f" on {result.last_commit_at or 'unknown date'}"
+        f" ({(result.last_commit_sha or '')[:8] or 'no sha'})"
+    )
     return CallToolResult(
         content=[TextContent(type="text", text=summary)],
         structuredContent=result.model_dump(),

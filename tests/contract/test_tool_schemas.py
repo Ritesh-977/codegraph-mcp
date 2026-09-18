@@ -70,5 +70,8 @@ def test_expected_tool_names_present() -> None:
         "find_file_dependencies",
         "search_nodes",
         "get_node_detail",
+        "get_file_content",
+        "get_function_source",
+        "get_file_metadata",
     }
     assert expected.issubset(names), f"missing tools: {expected - names}"

@@ -1,7 +1,19 @@
 [
   {
-    "description": "Find what files/functions depend on (or are depended on by) a given file.\nUse this to answer 'what breaks if I edit X?'. Returns imported_by, imports,\ncallers, calls, and external symbols (stdlib/npm).",
+    "description": "Find what files/functions depend on (or are depended on by) a given file.\nUse this to answer 'what breaks if I edit X?'. Returns imported_by, imports,\ncallers, calls, and external symbols (stdlib/npm). Deeper max_hops costs\nmore query time; results are capped per category with truncated=true.",
     "name": "find_file_dependencies"
+  },
+  {
+    "description": "Return real source code text for a file (not just metadata). Honors\ndeleted files (tombstones). Use start_line/end_line to slice a range;\nomit both for the whole file (capped at ~2000 lines, truncated=true if\nexceeded).",
+    "name": "get_file_content"
+  },
+  {
+    "description": "Who last touched a file, and when \u2014 last author, commit date, and sha.\nUse for ownership and staleness triage. Fields are null if the repo was\ningested without git history.",
+    "name": "get_file_metadata"
+  },
+  {
+    "description": "Return one function's source code body by its node id (from\nsearch_nodes or get_node_detail).",
+    "name": "get_function_source"
   },
   {
     "description": "Get detailed information about a single node (function/file) by its id.\nReturns name, kind, path, and line range. Use search_nodes to find the node id first.",
@@ -20,7 +32,7 @@
     "name": "list_repos"
   },
   {
-    "description": "Search for functions or files by name. Use this before find_file_dependencies\nor get_node_detail to find the exact path or node id.",
+    "description": "Search for functions or files by name, ranked by relevance (best first).\nUse this before find_file_dependencies or get_node_detail to find the exact\npath or node id. Page through large result sets with offset; the result's\nnext_offset is set when more may exist.",
     "name": "search_nodes"
   }
 ]

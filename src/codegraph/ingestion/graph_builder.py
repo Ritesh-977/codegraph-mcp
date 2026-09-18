@@ -9,12 +9,13 @@ Every Cypher statement is parameterized and filters on graph_id.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
 from codegraph.ingestion.commits import CommitInfo
-from codegraph.ingestion.resolver import resolve_js_import, resolve_python_import
-from codegraph.models.ingestion import ExtractedFile
+from codegraph.ingestion.languages import support_for
+from codegraph.models.ingestion import ExtractedCall, ExtractedFile
 
 
 @dataclass
@@ -39,15 +40,19 @@ def build_ingest_plan(
     """Build the ordered list of (Cypher, params) statements for ingestion."""
     plan: list[tuple[str, dict[str, Any]]] = []
 
-    # 1. Repository node
+    # 1. Repository node. `ingested_at` is deliberately NOT set here: it used to
+    # be stamped in this first statement, so a run that died at 80% still left a
+    # Repository claiming a fresh timestamp and list_repos reported a
+    # half-written graph as freshly ingested. It is stamped in the final
+    # statement instead, once the work has actually landed.
     plan.append((
         "MERGE (r:Repository {graph_id: $gid}) "
         "SET r.name = $name, r.url = $url, r.default_branch = $branch, "
-        "    r.ingested_at = datetime()",
+        "    r.ingest_status = 'running'",
         {"gid": slug, "name": slug, "url": url, "branch": branch},
     ))
 
-    # 2. Files + CONTAINS + DEFINES + IMPORTS (pass 1)
+    # 2. Files + CONTAINS + DEFINES (pass 1)
     for ef in files:
         ci = commits.get(ef.path)
         set_clause = "f.language = $lang, f.deleted = false"
@@ -80,7 +85,11 @@ def build_ingest_plan(
                 "MERGE (f)-[:DEFINES]->(fn)",
                 {"gid": slug, "path": ef.path, "qn": fn.qualified_name},
             ))
-        # imports
+    # 3. IMPORTS (pass 2) — deferred like CALLS below, because the edge is a
+    # MATCH-both-then-MERGE: emitting it inline above would silently drop every
+    # edge whose target file hasn't been created yet, so whether a dependency
+    # was recorded would depend on directory walk order.
+    for ef in files:
         for imp in ef.imports:
             resolved = _resolve(imp.module, ef.path, ef.language, known_paths)
             if resolved:
@@ -99,11 +108,11 @@ def build_ingest_plan(
                     {"gid": slug, "name": imp.module, "path": ef.path},
                 ))
 
-    # 3. CALLS resolution (pass 2) — needs all :Function nodes to exist
+    # 4. CALLS resolution (pass 3) — needs all :Function nodes to exist
     all_qnames = {fn.qualified_name for ef in files for fn in ef.functions}
     for ef in files:
         for call in ef.calls:
-            target_qn = _resolve_call(call.callee_name, all_qnames)
+            target_qn = _resolve_call(call, ef.path, all_qnames)
             if target_qn:
                 plan.append((
                     "MATCH (caller:Function {graph_id: $gid, qualified_name: $cq}), "
@@ -129,31 +138,105 @@ def build_ingest_plan(
         {"gid": slug, "paths": list(known_paths)},
     ))
 
+    # 5. Success marker — last statement, so it only lands if everything before
+    # it did. A crashed ingest leaves ingest_status='running' and the previous
+    # ingested_at, making the partial graph visibly incomplete.
+    plan.append((
+        "MATCH (r:Repository {graph_id: $gid}) "
+        "SET r.ingested_at = datetime(), r.ingest_status = 'complete'",
+        {"gid": slug},
+    ))
+
     return plan
 
 
 def _resolve(module: str, current_file: str, language: str, known: set[str]) -> str | None:
-    if language == "py":
-        return resolve_python_import(module, current_file, known)
-    return resolve_js_import(module, current_file, known)
+    """Dispatch to the language's own resolver.
+
+    Explicitly returns None for an unregistered language rather than falling
+    back to another language's resolver — a wrong resolver silently produces
+    zero edges, which looks like "this repo has no internal imports".
+    """
+    support = support_for(language)
+    if support is None:
+        return None
+    return support.resolve(module, current_file, known)
 
 
-def _resolve_call(callee_name: str, all_qnames: set[str]) -> str | None:
-    """Naive: match any qualified_name ending in .<callee_name>, ::<callee_name>, or equal to it."""
-    for qn in all_qnames:
-        if qn == callee_name or qn.endswith("." + callee_name) or qn.endswith("::" + callee_name):
-            return qn
-    return None
+def _resolve_call(call: ExtractedCall, current_file: str, all_qnames: set[str]) -> str | None:
+    """Resolve a call to a defining function's qualified_name, or None.
+
+    Ordered by confidence, and — critically — *deterministic at every step*.
+    The previous implementation iterated `all_qnames` (a set) and took the first
+    hit, so an overloaded method name like `save` could bind to a different
+    class on each ingest of the same repo. Candidates are now sorted before any
+    choice is made, so repeated ingests agree.
+    """
+    name = call.callee_name
+    if not name:
+        return None
+
+    # Every definition whose own name matches (`path::Class.save` or `path::save`).
+    candidates = sorted(
+        qn for qn in all_qnames
+        if qn == name or qn.endswith("." + name) or qn.endswith("::" + name)
+    )
+    if not candidates:
+        return None
+
+    def first(matching: list[str]) -> str | None:
+        return matching[0] if matching else None
+
+    # 1. `self.m()` — the method on the class enclosing the call site.
+    if call.receiver == "self" and call.caller_class:
+        hit = first([
+            qn for qn in candidates
+            if qn.startswith(f"{current_file}::") and f"::{call.caller_class}.{name}" in qn
+        ])
+        if hit:
+            return hit
+
+    # 2. Receiver resolved to a class (from `x = Foo()` or a `x: Foo` annotation).
+    if call.receiver and call.receiver != "self":
+        hit = first([qn for qn in candidates if qn.endswith(f"::{call.receiver}.{name}")])
+        if hit:
+            return hit
+
+    # 3. Same file — a local definition beats an identically named one elsewhere.
+    hit = first([qn for qn in candidates if qn.startswith(f"{current_file}::")])
+    if hit:
+        return hit
+
+    # 4. Unambiguous repo-wide, else the deterministic first of several.
+    return candidates[0]
 
 
-async def run_plan(adapter: Any, plan: list[tuple[str, dict[str, Any]]]) -> IngestSummary:
-    """Execute the plan against the adapter and return counts."""
+async def run_plan(
+    adapter: Any,
+    plan: list[tuple[str, dict[str, Any]]],
+    batch_size: int = 200,
+    progress: Callable[[int, int], None] | None = None,
+) -> IngestSummary:
+    """Execute the plan against the adapter, batching statements into
+    `batch_size`-sized transactions (one commit per batch instead of one per
+    statement), and return counts.
+
+    `progress(done, total)` is called after each batch commits. A full-history
+    ingest of a real repo is thousands of statements and can run for minutes;
+    without this it is completely silent.
+    """
     pruned = 0
-    for cypher, params in plan:
-        rows = await adapter._run_write(cypher, **params)
-        # The prune statement returns a count via RETURN — capture it
-        if "deleted = true" in cypher and rows:
-            pruned = int(rows[0].get("c", 0)) if rows else 0
+    size = max(batch_size, 1)
+    total = len(plan)
+    for i in range(0, total, size):
+        chunk = plan[i : i + size]
+        results = await adapter._run_write_batch(chunk)
+        if progress is not None:
+            progress(min(i + size, total), total)
+        for (cypher, _params), rows in zip(chunk, results, strict=True):
+            # The prune statement returns a count via RETURN — capture it
+            if "deleted = true" in cypher and rows:
+                pruned = int(rows[0].get("c", 0)) if rows else 0
     files = sum(1 for c, _ in plan if "MERGE (f:File" in c)
     functions = sum(1 for c, _ in plan if "MERGE (fn:Function" in c)
     imports = sum(1 for c, _ in plan if "[:IMPORTS]" in c)
