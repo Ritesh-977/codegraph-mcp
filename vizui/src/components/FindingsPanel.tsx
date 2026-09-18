@@ -73,6 +73,7 @@ export function FindingsPanel(props: FindingsPanelProps) {
     onHighlight(active === kind ? null : build())
 
   const maxHub = f.hubs[0]?.dependents ?? 1
+  const maxRisk = f.risk[0]?.score ?? 1
 
   return (
     <aside className="panel panel--left">
@@ -94,6 +95,30 @@ export function FindingsPanel(props: FindingsPanelProps) {
           <div className="stat__label">cycles</div>
         </div>
       </div>
+
+      <Section
+        title="Risk" count={f.risk.length} kind="risk" active={active === 'risk'}
+        onToggle={() => toggle('risk', () => ({ kind: 'risk', ids: f.risk.slice(0, 10).map((r) => fileId(r.path)) }))}
+      >
+        <p className="hint" style={{ marginTop: 0 }}>
+          Commits x dependents. Changed often <em>and</em> widely depended upon —
+          the files where a mistake travels furthest.
+        </p>
+        {f.coupling_available ? (
+          <div className="rows">
+            {f.risk.map((r) => (
+              <button key={r.path} className="row" onClick={() => onFocusPath(r.path)} title={r.path}>
+                <span className="row__bar"><i style={{ width: `${(r.score / maxRisk) * 100}%`, background: '#c04a45' }} /></span>
+                <span className="row__metric">{r.commits}c x {r.dependents}d</span>
+                <span className="row__path">{r.path}</span>
+              </button>
+            ))}
+            {!f.risk.length && <p className="empty">No file is both changed and depended upon.</p>}
+          </div>
+        ) : (
+          <p className="empty">{f.coupling_hint}</p>
+        )}
+      </Section>
 
       <Section
         title="Hubs" count={f.hubs.length} kind="hubs" active={active === 'hubs'}

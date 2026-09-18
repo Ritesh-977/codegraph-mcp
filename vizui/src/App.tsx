@@ -27,11 +27,13 @@ export function App() {
   const [findings, setFindings] = useState<Findings | null>(null)
   const [findingsLoading, setFindingsLoading] = useState(false)
   const [highlight, setHighlight] = useState<Highlight | null>(null)
+  const [riskMode, setRiskMode] = useState(false)
   const [focusRequest, setFocusRequest] = useState<{ id: string; nonce: number } | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   const elements = useMemo(() => (payload ? toElements(payload) : []), [payload])
   const nodes = useMemo(() => payload?.nodes ?? [], [payload])
+  const edges = useMemo(() => payload?.edges ?? [], [payload])
 
   useEffect(() => {
     fetchRepos().then(setRepos).catch((e: Error) => setError(e.message))
@@ -212,8 +214,10 @@ export function App() {
           <GraphCanvas
             elements={elements}
             nodes={nodes}
+            edges={edges}
             layout={layout}
             selectedNodeId={selectedId}
+            riskMode={riskMode}
             highlight={highlight}
             onNodeSelect={onNodeSelect}
             onNodeHover={NOOP}
@@ -242,6 +246,13 @@ export function App() {
                 </>
               )}
               <span className="hud__sep" />
+              <button
+                className={`btn${riskMode ? ' btn--active' : ''}`}
+                onClick={() => setRiskMode((r) => !r)}
+                title="Colour nodes by commits x dependents"
+              >
+                Risk overlay
+              </button>
               <button className="btn" disabled={!selectedNode?.path} onClick={onRequestNeighborhood}>
                 Isolate neighbourhood
               </button>

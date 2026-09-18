@@ -200,6 +200,8 @@ body {
 .legend__row { display: flex; align-items: center; gap: 7px; }
 .legend__swatch { width: 18px; height: 3px; border-radius: 2px; flex: none; }
 .legend__dot { border-radius: 50%; background: #58606e; flex: none; }
+.legend__ramp { display: flex; width: 18px; height: 8px; border-radius: 2px; overflow: hidden; flex: none; }
+.legend__ramp > i { flex: 1; }
 
 .banner {
   padding: var(--sp-2) var(--sp-4); font-size: 12px;

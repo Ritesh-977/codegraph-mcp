@@ -62,6 +62,21 @@ def parse_log(text: str) -> list[list[str]]:
     return commits
 
 
+def commit_counts(commits: list[list[str]], known: set[str]) -> dict[str, int]:
+    """How many commits touched each *currently present* file.
+
+    Raw git churn is dominated by files that no longer exist (in the repo this
+    was built against, three of the five highest-churn paths were deleted), so
+    the live file set is not optional. Unlike coupling, a wide commit still
+    counts here: reformatting a file really did change it.
+    """
+    counts: dict[str, int] = defaultdict(int)
+    for files in commits:
+        for path in {f for f in files if f in known}:
+            counts[path] += 1
+    return dict(counts)
+
+
 def co_change_pairs(
     commits: list[list[str]],
     known: set[str],

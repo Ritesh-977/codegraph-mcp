@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import os
 import sys
 import uuid
@@ -44,13 +45,19 @@ def _docker_daemon_reachable() -> bool:
         return False
 
 
-@pytest.fixture()
+@pytest.fixture(scope="session")
 def neo4j_env():  # type: ignore[no-untyped-def]
     """Return neo4j connection env if a live instance is available, else skip.
 
     Resolution order: (1) NEO4J_URI env var already set (manual `docker compose up`);
     (2) testcontainer spun up ad-hoc — only if Docker daemon is reachable.
     Skips cleanly if neither path works, so `make test` stays green without Docker.
+
+    Session-scoped on purpose: Neo4j is a heavyweight JVM boot (~30-40s), so a
+    container per test made the suite take ~22 minutes and starved later
+    containers into 120s startup timeouts. One container serves the whole
+    session; per-test isolation comes from `fresh_graph_id` + the `adapter`
+    fixture wiping that namespace on teardown.
     """
     uri = os.environ.get("NEO4J_URI")
     if uri:
@@ -69,24 +76,35 @@ def neo4j_env():  # type: ignore[no-untyped-def]
         yield {
             "NEO4J_URI": container.get_connection_url(),
             "NEO4J_USER": "neo4j",
-            "NEO4J_PASSWORD": container.settings.password,
+            "NEO4J_PASSWORD": container.password,
             "NEO4J_DB": "neo4j",
             "REPOS_DIR": "./repos",
         }
 
 
 @pytest.fixture()
-async def adapter(neo4j_env: dict[str, str] | None):  # type: ignore[no-untyped-def]
+async def adapter(neo4j_env: dict[str, str] | None, fresh_graph_id: str):  # type: ignore[no-untyped-def]
     if neo4j_env is None:
         pytest.skip("no neo4j")
     from codegraph.config import Settings
     from codegraph.repo.neo4j_adapter import Neo4jAdapter
 
-    s = Settings(**neo4j_env)
+    # Settings' fields are lowercase (neo4j_uri, ...) but neo4j_env's keys are
+    # uppercase env-var-style names; pydantic matches constructor kwargs by
+    # exact field name (not env-var aliasing, which only applies to actual
+    # os.environ/.env loading), so passing the dict as-is silently no-ops
+    # every override (extra="ignore" swallows the mismatch) and falls back
+    # to .env's bolt://localhost:7687 — never the ephemeral test container.
+    s = Settings(**{k.lower(): v for k, v in neo4j_env.items()})
     ad = Neo4jAdapter.from_settings(s)
     await ad.connect()
     await ad.apply_migrations()
     yield ad
+    # The container is session-scoped, so wipe this test's graph_id namespace
+    # rather than leaking it into every later test (list_repos, for one, is
+    # deliberately unfiltered by graph_id and would otherwise see it).
+    with contextlib.suppress(Exception):
+        await ad.soft_cleanup(fresh_graph_id)
     await ad.close()
 
 

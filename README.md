@@ -150,8 +150,10 @@ you to build the frontend.
 **What you get.** The default view is an *architecture* layout, not a
 force-directed blob: every node's row is its dependency depth (entry points on
 top, leaves at the bottom) and every node's size is how many files depend on
-it. Position and size carry meaning, so the picture is readable rather than
-decorative.
+it. Within each row, nodes are ordered to minimise edge crossings (barycenter
+sweep plus a transpose refinement, as in Sugiyama layered drawing) — measured
+at 60% fewer crossings than ordering rows by path. Position and size carry
+meaning, so the picture is readable rather than decorative.
 
 Alongside it, a Findings panel answers the questions you actually ask of an
 unfamiliar codebase, each one clickable to highlight it on the canvas:
@@ -163,6 +165,7 @@ unfamiliar codebase, each one clickable to highlight it on the canvas:
 | **Orphans** | What is dead, or reached some way the imports do not show? |
 | **Cycles** | Where is it tangled? (members share a row; the level edge is dashed red) |
 | **Change coupling** | What keeps changing together — especially pairs with *no* import between them, which is coupling the code never admits to |
+| **Risk** | Commits × dependents — changed often *and* widely depended upon. The **Risk overlay** button paints the canvas with this as a sequential ramp |
 
 Plus: search, click-to-highlight a neighbourhood (outgoing blue, incoming
 orange), particle flow along a hovered file's edges, a minimap, a detail panel

@@ -1,6 +1,7 @@
 import type { ElementDefinition } from 'cytoscape'
 import type { GraphEdge, GraphNode, GraphPayload } from '../types'
 import { nodeRadius } from './layout'
+import { riskColor, riskScore } from './risk'
 
 // Class names are the stylesheet's contract — see graph/style.ts.
 export function nodeClassName(n: GraphNode): string {
@@ -18,6 +19,15 @@ export function edgeClassName(e: GraphEdge): string {
 }
 
 export function toElements(payload: GraphPayload): ElementDefinition[] {
+  // The ramp is relative to this graph's own worst file — an absolute scale
+  // would wash out every small repo.
+  const scores = new Map<string, number>()
+  for (const n of payload.nodes) {
+    const s = riskScore({ commits: n.commits, fan_in: n.fan_in })
+    if (s !== null) scores.set(n.id, s)
+  }
+  const maxScore = Math.max(0, ...scores.values())
+
   const nodeEls: ElementDefinition[] = payload.nodes.map((n) => ({
     data: {
       id: n.id,
@@ -34,6 +44,11 @@ export function toElements(payload: GraphPayload): ElementDefinition[] {
       size: n.kind === 'dir_cluster'
         ? Math.min(70, 30 + Math.sqrt(n.file_count ?? 1) * 5)
         : nodeRadius(n.fan_in) * 2,
+      commits: n.commits ?? undefined,
+      riskScore: scores.get(n.id),
+      // Undefined for nodes with no git history, so risk mode leaves them
+      // neutral rather than claiming they are safe.
+      riskColor: scores.has(n.id) ? riskColor(scores.get(n.id)!, maxScore) : undefined,
     },
     classes: nodeClassName(n),
   }))

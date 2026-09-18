@@ -6,9 +6,9 @@ const payload: GraphPayload = {
   graph_id: 'o/n',
   view: 'full',
   nodes: [
-    { id: 'file:a.py', kind: 'file', label: 'a.py', path: 'a.py', language: 'python', file_count: null, layer: 0, fan_in: 4, fan_out: 1, in_cycle: false },
-    { id: 'sym:os', kind: 'symbol', label: 'os', path: null, language: null, file_count: null, layer: null, fan_in: null, fan_out: null, in_cycle: false },
-    { id: 'dir:src', kind: 'dir_cluster', label: 'src', path: 'src', language: null, file_count: 3, layer: 1, fan_in: 0, fan_out: 0, in_cycle: false },
+    { id: 'file:a.py', kind: 'file', label: 'a.py', path: 'a.py', language: 'python', file_count: null, layer: 0, fan_in: 4, fan_out: 1, in_cycle: false, commits: null },
+    { id: 'sym:os', kind: 'symbol', label: 'os', path: null, language: null, file_count: null, layer: null, fan_in: null, fan_out: null, in_cycle: false, commits: null },
+    { id: 'dir:src', kind: 'dir_cluster', label: 'src', path: 'src', language: null, file_count: 3, layer: 1, fan_in: 0, fan_out: 0, in_cycle: false, commits: null },
   ],
   edges: [{ source: 'file:a.py', target: 'sym:os', type: 'IMPORTS', weight: 1 }],
   stats: { file_count: 1, edge_count: 1, truncated: false, view: 'full' },
@@ -42,7 +42,7 @@ describe('toElements', () => {
     // container vs a node), so importance is only comparable file-to-file.
     const withFanIn = (id: string, fan_in: number): GraphNode => ({
       id, kind: 'file', label: id, path: id, language: null,
-      file_count: null, layer: 0, fan_in, fan_out: 0, in_cycle: false,
+      file_count: null, layer: 0, fan_in, fan_out: 0, in_cycle: false, commits: null,
     })
     const els = toElements({
       ...payload,

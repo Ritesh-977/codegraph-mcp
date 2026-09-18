@@ -28,6 +28,9 @@ class GraphNode(BaseModel):
     fan_in: int | None = None
     fan_out: int | None = None
     in_cycle: bool = False
+    # Commits touching this file in the clone's history; None when there is no
+    # local clone to read. Drives the risk overlay together with fan_in.
+    commits: int | None = None
 
 
 class GraphEdge(BaseModel):
@@ -138,6 +141,18 @@ class CouplingEntry(BaseModel):
     has_import_edge: bool
 
 
+class RiskEntry(BaseModel):
+    """Churn x dependents. Neither number alone finds the dangerous file: a
+    file changed constantly that nothing imports is cheap to get wrong, and a
+    heavily-depended-upon file nobody touches is stable. The product is what
+    ranks."""
+
+    path: str
+    commits: int
+    dependents: int
+    score: int
+
+
 class FindingsPayload(BaseModel):
     graph_id: str
     file_count: int
@@ -147,6 +162,7 @@ class FindingsPayload(BaseModel):
     entry_points: list[str] = []
     orphans: list[str] = []
     cycles: list[CycleEntry] = []
+    risk: list[RiskEntry] = []
     coupling: list[CouplingEntry] = []
     coupling_available: bool = True
     coupling_hint: str | None = None

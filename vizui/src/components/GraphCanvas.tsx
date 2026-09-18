@@ -5,7 +5,8 @@ import { buildStyle } from '../graph/style'
 import { architecturePositions } from '../graph/layout'
 import { startFlow, stopFlow } from '../graph/FlowOverlay'
 import { Minimap } from './Minimap'
-import type { GraphNode, Highlight } from '../types'
+import { RISK_RAMP } from '../graph/risk'
+import type { GraphEdge, GraphNode, Highlight } from '../types'
 
 cytoscape.use(fcose)
 
@@ -14,8 +15,10 @@ export type LayoutName = 'architecture' | 'fcose' | 'concentric' | 'breadthfirst
 export interface GraphCanvasProps {
   elements: ElementDefinition[]
   nodes: GraphNode[]
+  edges: GraphEdge[]
   layout: LayoutName
   selectedNodeId: string | null
+  riskMode: boolean
   highlight: Highlight | null
   onNodeSelect: (id: string | null) => void
   onNodeHover: (id: string | null) => void
@@ -80,7 +83,7 @@ export function GraphCanvas(props: GraphCanvasProps) {
     if (props.layout === 'architecture') {
       // `preset` takes a plain id -> {x, y} map; positions are computed rather
       // than simulated, which is the whole point of this view.
-      const positions = architecturePositions(props.nodes)
+      const positions = architecturePositions(props.nodes, props.edges)
       cy.layout({ name: 'preset', positions, fit: true, padding: 60 } as cytoscape.LayoutOptions).run()
       // Layering puts every edge strictly downward, so an edge whose ends share
       // a row can only be part of a cycle. That makes tangles visible without
@@ -94,7 +97,7 @@ export function GraphCanvas(props: GraphCanvasProps) {
       cy.layout({ name: props.layout, animate: false, padding: 50 }).run()
     }
     startFlow(cy, null)
-  }, [props.elements, props.nodes, props.layout])
+  }, [props.elements, props.nodes, props.edges, props.layout])
 
   // Selection: neighbourhood highlight with direction colouring.
   useEffect(() => {
@@ -134,6 +137,15 @@ export function GraphCanvas(props: GraphCanvasProps) {
     }
   }, [props.highlight, props.elements])
 
+  // Risk overlay: only nodes that actually have history get repainted, so a
+  // repo with no clone is visibly "unknown" rather than uniformly safe.
+  useEffect(() => {
+    const cy = cyRef.current
+    if (!cy) return
+    cy.nodes().removeClass('risk-on')
+    if (props.riskMode) cy.nodes().filter((n) => n.data('riskColor') !== undefined).addClass('risk-on')
+  }, [props.riskMode, props.elements])
+
   useEffect(() => {
     const cy = cyRef.current
     if (!cy || !props.focusRequest) return
@@ -154,6 +166,16 @@ export function GraphCanvas(props: GraphCanvasProps) {
             <span className="legend__dot" style={{ width: 13, height: 13 }} />
             <span>size = dependents</span>
           </div>
+          {props.riskMode && (
+            <div className="legend__row">
+              <span className="legend__ramp">
+                {RISK_RAMP.map((c) => (
+                  <i key={c} style={{ background: c }} />
+                ))}
+              </span>
+              <span>churn x dependents</span>
+            </div>
+          )}
           <div className="legend__row">
             <span className="legend__swatch" style={{ background: '#3987e5' }} />
             <span>imports (outgoing)</span>

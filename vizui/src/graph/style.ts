@@ -112,6 +112,12 @@ export const buildStyle = (): StylesheetJson => [
       'z-index': 25,
     },
   },
+  {
+    // Risk overlay. Sequential magnitude encoding, so it replaces the node's
+    // resting colour rather than adding another hue to the picture.
+    selector: 'node.risk-on',
+    style: { 'background-color': 'data(riskColor)', 'border-color': 'data(riskColor)' },
+  },
   { selector: '.faded', style: { opacity: 0.1 } },
   {
     selector: 'edge',

@@ -52,3 +52,21 @@ def test_pairs_sorted_by_strength() -> None:
     log = [["a", "b"], ["a", "b"], ["a", "b"], ["c", "d"], ["c", "d"]]
     pairs = co_change_pairs(log, known={"a", "b", "c", "d"}, min_shared=2)
     assert [(p.a, p.b, p.shared) for p in pairs] == [("a", "b", 3), ("c", "d", 2)]
+
+
+def test_commit_counts_only_counts_known_files() -> None:
+    """Deleted files dominate raw churn — three of this repo's top five no
+    longer exist — so counts must be intersected with the live file set."""
+    from codegraph.viz.churn import commit_counts
+
+    commits = [["a.py", "gone.py"], ["a.py"], ["gone.py"], ["b.py", "a.py"]]
+    assert commit_counts(commits, known={"a.py", "b.py"}) == {"a.py": 3, "b.py": 1}
+
+
+def test_commit_counts_includes_wide_commits() -> None:
+    """A sweeping commit is noise for *coupling* but real churn for each file."""
+    from codegraph.viz.churn import commit_counts
+
+    wide = [[f"f{i}.py" for i in range(400)]]
+    counts = commit_counts(wide, known={"f1.py"})
+    assert counts == {"f1.py": 1}

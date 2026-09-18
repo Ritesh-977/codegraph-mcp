@@ -13,6 +13,8 @@ export interface GraphNode {
   fan_in: number | null
   fan_out: number | null
   in_cycle: boolean
+  /** Commits touching this file in the clone's history; null if unavailable. */
+  commits: number | null
 }
 
 export interface GraphEdge {
@@ -134,6 +136,13 @@ export interface CouplingEntry {
   has_import_edge: boolean
 }
 
+export interface RiskEntry {
+  path: string
+  commits: number
+  dependents: number
+  score: number
+}
+
 export interface Findings {
   graph_id: string
   file_count: number
@@ -143,12 +152,13 @@ export interface Findings {
   entry_points: string[]
   orphans: string[]
   cycles: CycleEntry[]
+  risk: RiskEntry[]
   coupling: CouplingEntry[]
   coupling_available: boolean
   coupling_hint: string | null
 }
 
-export type FindingKind = 'hubs' | 'entries' | 'orphans' | 'cycles' | 'coupling'
+export type FindingKind = 'risk' | 'hubs' | 'entries' | 'orphans' | 'cycles' | 'coupling'
 
 export interface Highlight {
   kind: FindingKind

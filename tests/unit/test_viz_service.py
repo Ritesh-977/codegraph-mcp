@@ -170,3 +170,31 @@ def test_findings_reports_hubs_entries_orphans_cycles() -> None:
     # no clone on disk in the fake -> coupling degrades with a hint
     assert f.coupling_available is False
     assert f.coupling_hint
+
+
+def test_findings_risk_is_churn_times_dependents(tmp_path) -> None:
+    """Risk ranks on the product, so a busy leaf loses to a stable hub's churn."""
+    import codegraph.viz.service as svc_mod
+
+    svc = VizService(_fake(), tmp_path)
+    # auth.py has 1 dependent; give it 10 commits and db.py 30 with 1 dependent.
+    history = [["auth.py"]] * 10 + [["db.py"]] * 30 + [["auth.py", "db.py"]] * 2
+    svc._history["o/n"] = history
+    f = asyncio.run(svc.findings("o/n"))
+    by_path = {r.path: r for r in f.risk}
+    assert by_path["auth.py"].commits == 12
+    assert by_path["auth.py"].score == by_path["auth.py"].commits * by_path["auth.py"].dependents
+    # ranked by score, descending
+    assert [r.score for r in f.risk] == sorted((r.score for r in f.risk), reverse=True)
+    assert all(r.score > 0 for r in f.risk)
+    assert len(f.risk) <= svc_mod.MAX_RISK
+
+
+def test_graph_nodes_carry_commit_counts(tmp_path) -> None:
+    svc = VizService(_fake(), tmp_path)
+    svc._history["o/n"] = [["auth.py"], ["auth.py"], ["lib/util.py"]]
+    out = asyncio.run(svc.full_graph("o/n"))
+    by_id = {n.id: n for n in out.nodes}
+    assert by_id["file:auth.py"].commits == 2
+    assert by_id["file:api.py"].commits == 0   # present but never touched
+    assert by_id["sym:os"].commits is None     # not a file

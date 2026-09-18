@@ -17,7 +17,7 @@ from codegraph.models.common import MAX_TRAVERSAL_HOPS
 from codegraph.repo.neo4j_adapter import Neo4jAdapter
 from codegraph.source_reader import read_source_range
 from codegraph.viz.analysis import GraphMetrics, analyze
-from codegraph.viz.churn import co_change_pairs, read_history
+from codegraph.viz.churn import co_change_pairs, commit_counts, read_history
 from codegraph.viz.clustering import build_cluster_graph
 from codegraph.viz.models import (
     CouplingEntry,
@@ -34,12 +34,14 @@ from codegraph.viz.models import (
     ImpactPayload,
     ImpactRequest,
     ImpactRing,
+    RiskEntry,
     SubgraphRequest,
 )
 
 MAX_HUBS = 15
 MAX_ORPHANS = 50
 MAX_COUPLING = 20
+MAX_RISK = 15
 
 
 def _hop_bound(depth: int) -> int:
@@ -83,6 +85,17 @@ class VizService:
     def __init__(self, adapter: Neo4jAdapter, repos_dir: Path) -> None:
         self._adapter = adapter
         self._repos_dir = repos_dir
+        # Walking full history costs a git subprocess, so it is read once per
+        # process per repo. A re-ingest is picked up by restarting `codegraph
+        # viz` — acceptable for a read-only session tool.
+        self._history: dict[str, list[list[str]]] = {}
+
+    def _commit_history(self, graph_id: str) -> list[list[str]]:
+        cached = self._history.get(graph_id)
+        if cached is None:
+            cached = read_history(self._repos_dir, graph_id)
+            self._history[graph_id] = cached
+        return cached
 
     async def repos(self) -> list[dict[str, Any]]:
         return await self._adapter.list_repos()
@@ -139,6 +152,13 @@ class VizService:
             for r in fs
             if r["name"] in sym_ids
         )
+
+        history = self._commit_history(graph_id)
+        if history:
+            counts = commit_counts(history, known={r["path"] for r in files})
+            for n in nodes:
+                if n.kind == "file" and n.path is not None:
+                    n.commits = counts.get(n.path, 0)
         return nodes, edges, len(files)
 
     async def full_graph(self, graph_id: str, max_edges: int = 10_000) -> GraphPayload:
@@ -308,8 +328,22 @@ class VizService:
             for nid, count in m.hubs[:MAX_HUBS]
             if count > 0
         ]
-        history = read_history(self._repos_dir, graph_id)
+        history = self._commit_history(graph_id)
         known = {path(f) for f in files}
+        churn = commit_counts(history, known) if history else {}
+        risk = sorted(
+            (
+                RiskEntry(
+                    path=path(nid),
+                    commits=churn.get(path(nid), 0),
+                    dependents=m.fan_in.get(nid, 0),
+                    score=churn.get(path(nid), 0) * m.fan_in.get(nid, 0),
+                )
+                for nid in files
+            ),
+            key=lambda r: (-r.score, r.path),
+        )
+        risk = [r for r in risk if r.score > 0][:MAX_RISK]
         coupling: list[CouplingEntry] = []
         if history:
             import_pairs = {tuple(sorted((path(s), path(t)))) for s, t in ff}
@@ -332,6 +366,7 @@ class VizService:
             entry_points=[path(n) for n in m.entry_points],
             orphans=[path(n) for n in m.orphans[:MAX_ORPHANS]],
             cycles=[CycleEntry(paths=[path(p) for p in c]) for c in m.cycles],
+            risk=risk,
             coupling=coupling,
             coupling_available=bool(history),
             coupling_hint=(

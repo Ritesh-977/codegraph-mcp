@@ -23,3 +23,33 @@ async def test_get_node_detail_returns_lines(adapter, fresh_graph_id) -> None:
     )
     assert res.start_line == 3
     assert res.end_line == 5
+
+
+async def test_get_node_detail_excludes_tombstoned_file(adapter, fresh_graph_id) -> None:
+    rows = await adapter._run_write(
+        "CREATE (f:File {graph_id: $gid, path: 'gone.py', language: 'py', deleted: true}) "
+        "RETURN elementId(f) AS id",
+        gid=fresh_graph_id,
+    )
+    nid = rows[0]["id"]
+    from codegraph.models.tools import GetNodeDetailArgs
+    from codegraph.tools.get_node_detail import get_node_detail
+
+    with pytest.raises(ValueError, match="not found"):
+        await get_node_detail(adapter, GetNodeDetailArgs(graph_id=fresh_graph_id, node_id=nid))
+
+
+async def test_get_node_detail_excludes_function_in_tombstoned_file(adapter, fresh_graph_id) -> None:
+    rows = await adapter._run_write(
+        "CREATE (f:File {graph_id: $gid, path: 'gone.py', language: 'py', deleted: true}) "
+        "-[:DEFINES]->(fn:Function {graph_id: $gid, qualified_name: 'ghost', name: 'ghost', "
+        "kind: 'function'}) "
+        "RETURN elementId(fn) AS id",
+        gid=fresh_graph_id,
+    )
+    nid = rows[0]["id"]
+    from codegraph.models.tools import GetNodeDetailArgs
+    from codegraph.tools.get_node_detail import get_node_detail
+
+    with pytest.raises(ValueError, match="not found"):
+        await get_node_detail(adapter, GetNodeDetailArgs(graph_id=fresh_graph_id, node_id=nid))

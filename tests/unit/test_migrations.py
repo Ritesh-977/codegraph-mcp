@@ -5,13 +5,21 @@ from __future__ import annotations
 from codegraph.repo.migrations import build_migration_cypher
 
 
-def test_migrations_returns_six_statements() -> None:
+def test_migrations_returns_expected_statements() -> None:
     stmts = build_migration_cypher()
-    assert len(stmts) == 6
+    assert len(stmts) == 8
     for s in stmts:
-        assert s.startswith("CREATE CONSTRAINT") or s.startswith("CREATE INDEX"), (
+        assert s.startswith(("CREATE CONSTRAINT", "CREATE INDEX", "CREATE FULLTEXT INDEX")), (
             f"unexpected statement prefix: {s}"
         )
+
+
+def test_migrations_include_fulltext_indexes_for_ranked_search() -> None:
+    """search_nodes ranks by relevance via these; without them it silently
+    falls back to unranked substring matching."""
+    stmts = build_migration_cypher()
+    assert any("FULLTEXT INDEX function_fulltext" in s for s in stmts)
+    assert any("FULLTEXT INDEX file_fulltext" in s for s in stmts)
 
 
 def test_migrations_include_constraint_on_repository() -> None:
